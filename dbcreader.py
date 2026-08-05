@@ -34,9 +34,9 @@ class Database:
     """Parse a DBC file and build an in-memory model of its messages and signals."""
 
     def __init__(self, filename):
-        self.filename = filename
-        self.messages = {}
-        self.signals = {}
+        self.filename: str = filename
+        self.messages: dict[str, Message] = {}
+        self.signals: dict[str, Signal] = {}
         self._parse(filename)
 
     def _parse(self, filename):
