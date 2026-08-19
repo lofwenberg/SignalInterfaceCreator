@@ -12,9 +12,7 @@ class SignalInterface:
         self.software_interface_dict = None
         self.signals = dict()
         self.software_components = dict()
-        self.parse_signal_interface(si_path)
 
-    def parse_signal_interface(self, si_path: str):
         path = Path(f"{si_path}/software_interface.json")
         if not path.exists():
             raise FileNotFoundError(f"JSON file not found: {path.resolve()}")
@@ -75,28 +73,45 @@ class SignalInterface:
 
         # Validate signals in SWCs
         for swc_name, swc in swcs.items():
-            for signal in swc.input_signals:
-                if signal in self.signals:
+            for signal_name in swc.input_signals:
+                if signal_name in self.signals:
                     # Signal found, check for direction
-                    if not signal.is_input():
+                    if type(self.signals[signal_name]) != InternalSignal and not self.signals[signal_name].is_input:
                         raise ValueError(
-                            f"Input signal {signal} is defined as input in software component {swc_name} but is defined as output in {self.ecu_name}")
+                            f"Input signal {signal_name} is defined as input in software component {swc_name} but is defined as output in {self.ecu_name}")
+                    if self.signals[signal_name].type != swc.input_signals[signal_name].type:
+                        raise ValueError(f"Input signal {signal_name} is not same type in software component {swc_name} and {self.ecu_name}")
                 else:
-                    raise ValueError(f"Input signal {signal} defined in software component {swc_name} is missing in {self.ecu_name}")
+                    raise ValueError(f"Input signal {signal_name} defined in software component {swc_name} is missing in {self.ecu_name}")
 
+
+            for signal_name in swc.output_signals:
+                if signal_name in self.signals:
+                    # Signal found, check for direction
+                    if type(self.signals[signal_name]) != InternalSignal and self.signals[signal_name].is_input:
+                        raise ValueError(
+                            f"Output signal {signal_name} is defined as output in software component {swc_name} but is defined as input in {self.ecu_name}")
+                    if self.signals[signal_name].type != swc.output_signals[signal_name].type:
+                        raise ValueError(f"Output signal {signal_name} is not same type in software component {swc_name} and {self.ecu_name}")
+                else:
+                    raise ValueError(f"Output signal {signal_name} defined in software component {swc_name} is missing in {self.ecu_name}")
+
+    def generate_templates(self):
+        pass
 
 class Signal:
     pass
 
+
 class CanSignal:
-    def __init__(self, database_signal, is_receive_signal: bool):
+    def __init__(self, database_signal, is_input: bool):
         self.name = database_signal.name
         self.size = database_signal.size
         self.signed = database_signal.signed
         self.transmitter = database_signal.message.transmitter
         self.receivers = database_signal.receivers
         self.database_signal = database_signal
-        self.is_receive_signal = is_receive_signal
+        self.is_input = is_input
         self.is_consumed = False
 
     @property
@@ -124,7 +139,7 @@ class IOSignal:
     def __init__(self, signal_name: str, connection: str, is_input: bool, pullup: bool):
         self.name = signal_name
         self.connection = connection
-        self.input = is_input
+        self.is_input = is_input
         self.pullup = pullup
         self.type = "bool"
 
@@ -262,4 +277,4 @@ class SoftwareComponent:
 
 if __name__ == "__main__":
     signal_interface = SignalInterface(r"../AuxiliaryLightsModule/", r"../database.dbc")
-    print(signal_interface)
+    signal_interface.generate_templates()
