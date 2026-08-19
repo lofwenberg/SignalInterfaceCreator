@@ -130,7 +130,92 @@ class SignalInterface:
             with open(f"output/{file}", "w") as f:
                 f.write(file_text)
 
+    def _generate_can_handler(self):
 
+        with open(f"c_templates/canMessageHandler_TEMPLATE.c") as f:
+            c_file = string.Template(f.read())
+
+        with open(f"c_templates/canMessageHandler_TEMPLATE.h") as f:
+            h_file = string.Template(f.read())
+
+        bitfield = "// Bitfield struct representing all relevant signals (Intel/LSB)"
+
+        can_messages = self.get_can_messages()
+
+        for message in can_messages:
+
+            # Get bit positions and sort in case it wasn't sorted
+            bit_pos_list = list(message.signals.keys())
+            bit_pos_list.sort()
+
+            for bit_pos in bit_pos_list:
+                pass
+
+
+        file_text = c_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    def get_can_signals(self):
+        can_signals = []
+        for signal in self.signals.values():
+            if type(signal) == CanSignal:
+                can_signals.append(signal.database_signal)
+
+        return can_signals
+
+    def get_can_messages(self):
+        can_signals = self.get_can_signals()
+        messages = []
+        for signal in can_signals:
+            if signal.message not in messages:
+                messages.append(signal.message)
+
+        return messages
+
+"""
+typedef struct {
+    uint8_t Light_Counter_Lsb : 8;         
+    uint8_t Light_Counter_Msb : 4;         // bits 0-11
+    uint8_t Filler1 : 2;                   // bits 12-13
+    uint8_t Lightmode_Active : 2;          // bits 14-15
+    uint8_t Headlight_Mode_Active : 1;     // bit 16
+    uint8_t Front_Fog_Active : 1;          // bit 17
+    uint8_t Left_Parklight_Active : 1;     // bit 18
+    uint8_t Right_Parklight_Active : 1;    // bit 19
+    uint8_t Rear_Fog_Active : 2;           // bits 20-21
+    uint8_t Light_Switch_Active : 1;       // bit 22
+    uint8_t Reverse_Light_Active : 1;      // bit 23
+    uint8_t Filler2 : 1;                   // bit 24
+    uint8_t Unknown_Active : 1;            // bit 25
+    uint8_t Parklight_Active : 1;          // bit 26
+    uint8_t Filler3 : 2;                   // bits 27-28
+    uint8_t Lefthand_Traffic_Active : 1;   // bit 29
+    uint8_t UnknownSignal : 1;             // bit 30
+    uint8_t Filler4 : 2;                   // bits 31-32
+    uint8_t Highbeam_Active : 1;           // bit 33
+    uint8_t Auto_Light_Active : 1;         // bit 34
+} MQB_Light_Info_t;
+
+/* Persistent variable */
+bool MQB_Light_Info_Highbeam_Active;
+
+/* Public Functions */
+void canMessageHandler_MQB_Light_Info_Handler_init()
+{
+    MQB_Light_Info_Highbeam_Active = false;
+}
+
+void canMessageHandler_MQB_Light_Info_Handler_run(uint8_t payload[8])
+{
+    // Cast payload array to struct pointer for direct access
+    MQB_Light_Info_t* info = (MQB_Light_Info_t*)payload;
+
+    MQB_Light_Info_Highbeam_Active = info->Highbeam_Active;
+}
+
+bool canMessageHandler_MQB_Light_Info_Highbeam_Active_Read(void)
+{
+    return MQB_Light_Info_Highbeam_Active;
+}"""
 
 
 class Signal:
