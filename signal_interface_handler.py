@@ -1,5 +1,9 @@
 import json
+import os.path
+import shutil
+import string
 
+from datetime import datetime
 from pathlib import Path
 from dbcreader import Database
 
@@ -97,7 +101,27 @@ class SignalInterface:
                     raise ValueError(f"Output signal {signal_name} defined in software component {swc_name} is missing in {self.ecu_name}")
 
     def generate_templates(self):
-        pass
+        # Start by clearing out output
+        if os.path.isdir("output"):
+            # Remove dir, easiest way to clean
+            shutil.rmtree("output")
+
+        # Recreate dir
+        os.mkdir("output")
+
+        # Generate files
+        self._generate_main()
+
+    @staticmethod
+    def _generate_main():
+        with open("c_templates/main.c") as f:
+            file_text = string.Template(f.read())
+
+        file_text = file_text.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+        with open("output/main.c", "w") as f:
+            f.write(file_text)
+
 
 class Signal:
     pass
