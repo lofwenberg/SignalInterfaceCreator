@@ -8,6 +8,14 @@ class ControlUnit:
     def __repr__(self):
         return self.name
 
+    def __eq__(self, other):
+        if isinstance(other, ControlUnit):
+            return self.name == other.name
+        elif isinstance(other, str):
+            return self.name == other
+        else:
+            return NotImplemented
+
     def add_message(self, message: Message):
         self.messages.append(message)
         message.transmitter = self

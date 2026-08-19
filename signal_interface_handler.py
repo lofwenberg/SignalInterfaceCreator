@@ -1,30 +1,23 @@
 import json
-from os import name
+
 from pathlib import Path
-
-import dbcreader
 from dbcreader import Database
-
-# Default paths
-DEFAULT_JSON_PATH = r"..\signal_interface.json"
-DEFAULT_DBC_PATH = r"..\database.dbc"
 
 class SignalInterface:
     can_database = None
 
-    def __init__(self, json_path: str = DEFAULT_JSON_PATH, dbc_path: str = DEFAULT_DBC_PATH):
-        self.dbc_path = dbc_path
+    def __init__(self, si_path: str, dbc_file: str):
+        self.dbc_file = dbc_file
         self.ecu_name = ""
-        self.signal_interface_dict = None
+        self.software_interface_dict = None
         self.signals = dict()
-        self.runnables = dict()
+        self.software_components = dict()
+        self.parse_signal_interface(si_path)
 
-        self.parse_json(json_path)
-
-    def parse_json(self, file_path: str):
-        path = Path(file_path)
+    def parse_signal_interface(self, si_path: str):
+        path = Path(f"{si_path}/software_interface.json")
         if not path.exists():
-            raise FileNotFoundError(f"JSON file not found: {path}")
+            raise FileNotFoundError(f"JSON file not found: {path.resolve()}")
 
         with path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
@@ -34,165 +27,239 @@ class SignalInterface:
             raise ValueError("Expecting exactly 1 ECU-object.")
 
         self.ecu_name = next(iter(data.keys()))
-        self.signal_interface_dict = data[self.ecu_name]
+        self.software_interface_dict = data[self.ecu_name]
 
-        # Handle signals
-        if "signals" not in self.signal_interface_dict:
-            raise ValueError(f"Expecting a 'signals' object for {self.ecu_name}")
+        # Handle CAN-database
+        self.can_database = Database(self.dbc_file)
 
-        self._read_signals(self.signal_interface_dict["signals"])
+        for can_signal in self.can_database.signals.values():
+            # Only do signals sent or received by this ECU
+            if self.ecu_name == can_signal.message.transmitter.name:
+                signal = CanSignal(can_signal, False)
+                self.signals[signal.name] = signal
+            elif self.ecu_name in can_signal.receivers:
+                signal = CanSignal(can_signal, True)
+                self.signals[signal.name] = signal
 
-        if len(self.signals) < 2:
-            raise ValueError(f"Expecting at least 1 signal for {self.ecu_name}")
+        # Handle IO Signals
+        if "io_signals" not in self.software_interface_dict:
+            raise ValueError(f"Expecting a 'io_signals' object for {self.ecu_name}")
 
-        # Handle runnables
-        if "runnables" not in self.signal_interface_dict:
-            raise ValueError(f"Expecting a 'runnables' object for {self.ecu_name}")
+        io_signals = IOSignal.parse_signals(self.software_interface_dict["io_signals"])
 
-        self._parse_runnables(self.signal_interface_dict["runnables"])
-
-    def _read_signals(self, signal_list: list[dict]):
-        for i, signal_dict in enumerate(signal_list):
-            if "name" not in signal_dict:
-                raise ValueError(f"Expecting name entry for signal number {i}")
-            signal_name = signal_dict["name"]
-
+        # Handle duplicates
+        for signal_name, signal in io_signals.items():
             if signal_name in self.signals:
                 raise ValueError(f"Duplicate entry for signal {signal_name}")
 
-            if "size" not in signal_dict:
-                raise ValueError(f"Expecting size entry for signal {signal_name}")
+            self.signals[signal_name] = signal
 
-            signal_size = signal_dict["size"]
+        # Handle internal signals
+        if "internal_signals" not in self.software_interface_dict:
+            raise ValueError(f"Expecting a 'internal_signals' object for {self.ecu_name}")
 
-            if not isinstance(signal_size, int) or signal_size < 1:
-                raise ValueError(f"Expecting positive integer for signal size for signal {signal_name}. Got {signal_size}")
+        internal_signals = InternalSignal.parse_signals(self.software_interface_dict["internal_signals"])
 
-            if signal_size > 1:
-                if "signed" not in signal_dict:
-                    raise ValueError(f"Expecting signed entry for signal {signal_name}")
+        # Handle duplicates
+        for signal_name, signal in internal_signals.items():
+            if signal_name in self.signals:
+                raise ValueError(f"Duplicate entry for signal {signal_name}")
 
-                signed = signal_dict["signed"]
+            self.signals[signal_name] = signal
 
-                if not isinstance(signed, bool):
-                    raise ValueError(f"Expecting boolean value for signed entry in signal {signal_name}")
-            else:
-                signed = True
+        # Handle software components
+        if "software_components" not in self.software_interface_dict:
+            raise ValueError(f"Expecting a 'software_components' object for {self.ecu_name}")
 
-            if "connection" not in signal_dict or signal_dict["connection"] is None:
-                # Assume internal signal
-                self.signals[signal_name] = InternalSignal(signal_name, signal_size, signed)
-            else:
-                if "input" not in signal_dict:
-                    raise ValueError(f"Expecting input entry for signal {signal_name}")
+        swcs = SoftwareComponent.parse_swcs(si_path, self.software_interface_dict["software_components"])
 
-                is_input = signal_dict["input"]
-
-                if not isinstance(is_input, bool):
-                    raise ValueError(f"Expecting boolean value for input entry in signal {signal_name}")
-
-                if signal_dict["connection"] == "CAN":
-                    # Only load can database when needed
-                    if self.can_database is None:
-                        self.can_database = Database(self.dbc_path)
-
-                    self.signals[signal_name] = CanSignal(signal_name, signal_size, signed, is_input, self.can_database)
-
+        # Validate signals in SWCs
+        for swc_name, swc in swcs.items():
+            for signal in swc.input_signals:
+                if signal in self.signals:
+                    # Signal found, check for direction
+                    if not signal.is_input():
+                        raise ValueError(
+                            f"Input signal {signal} is defined as input in software component {swc_name} but is defined as output in {self.ecu_name}")
                 else:
-                    pin_connection = signal_dict["connection"]
+                    raise ValueError(f"Input signal {signal} defined in software component {swc_name} is missing in {self.ecu_name}")
 
-                    if "pullup" not in signal_dict:
-                        raise ValueError(f"Expecting pullup entry for signal {signal_name}")
 
-                    pullup = signal_dict["pullup"]
-
-                    if not isinstance(pullup, bool):
-                        raise ValueError("Expecting boolean value for pullup entry in signal {signal_name}")
-
-                    self.signals[signal_name] = IOSignal(signal_name, signal_size, signed, pin_connection, is_input, pullup)
-
-    def _parse_runnables(self, runnable_list: list[dict]):
-        for i, runnable_dict in enumerate(runnable_list):
-            if "name" not in runnable_dict:
-                raise ValueError(f"Expecting name entry for runnable number {i}")
-            runnable_name = runnable_dict["name"]
-
-            if "period" not in runnable_dict:
-                raise ValueError(f"Expecting period entry for runnable {runnable_name}")
-
-            period = runnable_dict["period"]
-
-            if not isinstance(period, int) or period < 1:
-                raise ValueError(f"Expecting positive integer for period entry for runnable {runnable_name}")
-
-            if "inputs" not in runnable_dict:
-                raise ValueError(f"Expecting input_signal entry for runnable {runnable_name}")
-
-            input_signals = list()
-            for signal in runnable_dict["inputs"]:
-                if signal not in self.signals:
-                    raise ValueError(f"Input signal {signal} in runnable {runnable_name} not defined on toplevel")
-
-                if signal in input_signals:
-                    raise ValueError(f"Duplicate entry for input signal {signal} in runnable {runnable_name}")
-
-                input_signals.append(self.signals[signal])
-
-            if "outputs" not in runnable_dict:
-                raise ValueError(f"Expecting output_signals entry for runnable {runnable_name}")
-
-            output_signals = list()
-            for signal in runnable_dict["outputs"]:
-
-                if signal in input_signals:
-                    raise ValueError(f"Signal {signal} in runnable {runnable_name} defined both as input and output")
-
-                if signal in output_signals:
-                    raise ValueError(f"Duplicate entry for output signal {signal} in runnable {runnable_name}")
-
-                output_signals.append(self.signals[signal])
-
-            self.runnables[runnable_name] = Runnable(runnable_name, period, input_signals, output_signals)
-
-class InternalSignal:
-    def __init__(self, signal_name: str, size: int, signed: bool):
-        self.Name = signal_name
-        self.Size = size
-        self.Signed = signed
+class Signal:
+    pass
 
 class CanSignal:
-    def __init__(self, signal_name: str, size: int, signed: bool, is_input: bool, can_database: Database):
-        # Find signal
-        if signal_name not in can_database.signals:
-            raise ValueError(f"Expecting signal {signal_name} in CAN database")
-
-        database_signal = can_database.signals[signal_name]
-
-        # Validate CAN signal
-        if database_signal.size != size:
-            raise ValueError(f"Signal {signal_name} does not match for size between JSON and DBC")
-
-        if database_signal.signed != signed:
-            raise ValueError(f"Signal {signal_name} does not match for signal {signal_name}")
-
-        self.Name = signal_name
-        self.Size = size
-        self.Signed = signed
-        self.is_input = is_input
+    def __init__(self, database_signal, is_receive_signal: bool):
+        self.name = database_signal.name
+        self.size = database_signal.size
+        self.signed = database_signal.signed
+        self.transmitter = database_signal.message.transmitter
+        self.receivers = database_signal.receivers
         self.database_signal = database_signal
+        self.is_receive_signal = is_receive_signal
+        self.is_consumed = False
+
+    @property
+    def type(self):
+        if self.size == 1:
+            return "bool"
+        elif self.size <= 8:
+            if self.signed:
+                return "int_8"
+            else:
+                return "uint_8"
+        elif self.size <= 16:
+            if self.signed:
+                return "int_16"
+            else:
+                return "uint_16"
+        else:
+            if self.signed:
+                return "int_32"
+            else:
+                return "uint_32"
+
 
 class IOSignal:
-    def __init__(self, signal_name, size, signed, connection, is_input, pullup):
-        self.Name = signal_name
-        self.Size = size
-        self.Signed = signed
-        self.Connection = connection
-        self.Input = is_input
-        self.Pullup = pullup
+    def __init__(self, signal_name: str, connection: str, is_input: bool, pullup: bool):
+        self.name = signal_name
+        self.connection = connection
+        self.input = is_input
+        self.pullup = pullup
+        self.type = "bool"
 
-class Runnable:
-    def __init__(self, runnable_name: str, period: int, input_signals: list, output_signals: list):
-        self.name = runnable_name
-        self.period = period
-        self.input_signals = input_signals
-        self.output_signals = output_signals
+    @classmethod
+    def parse_signals(cls, json_signal_list: list[dict]) -> dict[str,IOSignal]:
+        signals = {}
+        for i, signal_dict in enumerate(json_signal_list):
+            if "name" not in signal_dict:
+                raise ValueError(f"Expecting name entry for IO signal number {i + 1}")
+
+            signal_name = signal_dict["name"]
+
+            if signal_name in signals:
+                raise ValueError(f"Duplicate entry for IO signal {signal_name}")
+
+            if "input" not in signal_dict:
+                raise ValueError(f"Expecting input entry for IO signal {signal_name}")
+
+            is_input = signal_dict["input"]
+
+            if not isinstance(is_input, bool):
+                raise ValueError(f"Expecting boolean value for input entry in IO signal {signal_name}")
+
+            if "connection" not in signal_dict:
+                raise ValueError(f"Expecting connection entry for IO signal {signal_name}")
+
+            pin_connection = signal_dict["connection"]
+
+            if "pullup" not in signal_dict:
+                raise ValueError(f"Expecting pullup entry for IO signal {signal_name}")
+
+            pullup = signal_dict["pullup"]
+
+            if not isinstance(pullup, bool):
+                raise ValueError(f"Expecting boolean value for pullup entry in IO signal {signal_name}")
+
+            signal = cls(signal_name, pin_connection, is_input, pullup)
+
+            signals[signal_name] = signal
+
+        return signals
+
+
+class InternalSignal:
+    def __init__(self, signal_name: str, signal_type: str):
+        self.name = signal_name
+        self.type = signal_type
+
+    @classmethod
+    def parse_signals(cls, json_signal_list: list[dict]) -> dict[str, InternalSignal]:
+        signals = {}
+        for i, signal_dict in enumerate(json_signal_list):
+            if "name" not in signal_dict:
+                raise ValueError(f"Expecting name entry for {cls.__name__} number {i + 1}")
+
+            signal_name = signal_dict["name"]
+
+            if signal_name in signals:
+                raise ValueError(f"Duplicate entry for {cls.__name__} {signal_name}")
+
+            if "type" not in signal_dict:
+                raise ValueError(f"Expecting type entry for {cls.__name__} {signal_name}")
+
+            signal_type = signal_dict["type"]
+
+            signal = cls(signal_name, signal_type)
+
+            signals[signal_name] = signal
+
+        return signals
+
+
+class SoftwareComponent:
+    def __init__(self, swc_name: str,  swc_dict: dict):
+        self.name = swc_name
+        self.software_component_dict = swc_dict
+
+        # Handle input Signals
+        if "input_signals" not in self.software_component_dict:
+            raise ValueError(f"Expecting a 'input_signals' object for {self.name}")
+
+        self.input_signals = InternalSignal.parse_signals(self.software_component_dict["input_signals"])
+
+        # Handle output Signals
+        if "output_signals" not in self.software_component_dict:
+            raise ValueError(f"Expecting a 'output_signals' object for {self.name}")
+
+        self.output_signals = InternalSignal.parse_signals(self.software_component_dict["output_signals"])
+
+        # Handle inits
+        if "inits" not in self.software_component_dict:
+            raise ValueError(f"Expecting a 'inits' object for {self.name}")
+
+        self.inits = self.software_component_dict["inits"]
+
+        # Handle periodicals
+        if "periodicals" not in self.software_component_dict:
+            raise ValueError(f"Expecting a 'periodicals' object for {self.name}")
+
+        self.periodicals = []
+
+        for i, periodical in enumerate(self.software_component_dict["periodicals"]):
+            if "name" not in periodical:
+                raise ValueError(f"Expecting name entry for periodical number {i + 1} in {self.name}")
+            periodical_name = periodical["name"]
+
+            if "period" not in periodical:
+                raise ValueError(f"Expecting a 'period' entry for {periodical_name} in {self.name}")
+
+            period = periodical["period"]
+
+            if not isinstance(period, int) or period < 1:
+                raise ValueError(f"Expecting positive integer for period entry for {periodical_name} in {self.name}")
+
+            self.periodicals.append((periodical_name, period))
+
+    @classmethod
+    def parse_swcs(cls, si_path: str, json_swc_list: list[str]) -> dict[str, SoftwareComponent]:
+        swcs = {}
+
+        for swc_name in json_swc_list:
+            # Find SWC
+            path = Path(f"{si_path}/{swc_name}/software_component.json")
+            if not path.exists():
+                raise FileNotFoundError(f"Software component not found: {path.resolve()}")
+
+            with path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+
+            swc_dict = next(iter(data.values()))
+            swc = cls(swc_name, swc_dict)
+            swcs[swc_name] = swc
+
+        return swcs
+
+if __name__ == "__main__":
+    signal_interface = SignalInterface(r"../AuxiliaryLightsModule/", r"../database.dbc")
+    print(signal_interface)
