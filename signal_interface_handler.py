@@ -110,17 +110,27 @@ class SignalInterface:
         os.mkdir("output")
 
         # Generate files
-        self._generate_main()
+        self._generate_static_files()
+        self._generate_can_handler()
 
     @staticmethod
-    def _generate_main():
-        with open("c_templates/main.c") as f:
-            file_text = string.Template(f.read())
+    def _generate_static_files():
+        files = ["main.c",
+                 "canHandler.c",
+                 "canHandler.h",
+                 "initBoard.c",
+                 "initBoard.h"]
 
-        file_text = file_text.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        for file in files:
+            with open(f"c_templates/{file}") as f:
+                file_text = string.Template(f.read())
 
-        with open("output/main.c", "w") as f:
-            f.write(file_text)
+            file_text = file_text.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+            with open(f"output/{file}", "w") as f:
+                f.write(file_text)
+
+
 
 
 class Signal:
