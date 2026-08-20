@@ -9,5 +9,5 @@
 #include <stdint.h>
 #include <xc.h>
 
-/* Message definitions */
-$MESSAGE_DEFINITONS
+/* Message definition */
+$MESSAGE_DEFINITION

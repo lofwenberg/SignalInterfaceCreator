@@ -4,6 +4,7 @@ import shutil
 import string
 
 from datetime import datetime
+from math import ceil
 from pathlib import Path
 from dbcreader import Database
 
@@ -138,21 +139,123 @@ class SignalInterface:
         with open(f"c_templates/canMessageHandler_TEMPLATE.h") as f:
             h_file = string.Template(f.read())
 
-        bitfield = "// Bitfield struct representing all relevant signals (Intel/LSB)"
+        bitfield_list = []
+        persistent_var_list = ["/* Persistent variable */"]
+        message_init_list = []
+        message_run_list = []
+        signal_read_list = []
+        signal_write_list = []
 
         can_messages = self.get_can_messages()
 
         for message in can_messages:
+            # Prepare init function
+            message_init_list.append(f"void canMessageHandler_{message.name}_init()\n{{")
+            # Prepare run function
+            if self.ecu_name in message.transmitter.name:
+                is_send_message = True
+                message_run_list.append(f"void canMessageHandler_{message.name}_run(uint8_t payload[8])\n"
+                                        "{\n"
+                                        "\t// Create send struct\n"
+                                        f"\t{message.name}_t* info;\n")
+            else:
+                is_send_message = False
+                message_run_list.append(f"void canMessageHandler_{message.name}_run(uint8_t payload[8])\n"
+                                        "{\n"
+                                        "\t// Cast payload array to struct pointer for direct access\n"
+                                        f"\t{message.name}_t* info = ({message.name}_t*)payload;\n")
+            # Prepare variables
+            persistent_var_list.append(f"// {message.name}")
 
+            # Handle bitfield
+            bitfield_list.append("typedef struct {")
             # Get bit positions and sort in case it wasn't sorted
             bit_pos_list = list(message.signals.keys())
             bit_pos_list.sort()
 
+            filler_counter = 0
+
+            if bit_pos_list[0] != 0:
+                # Special case for bitfield if first bits are not occupied
+                next_bit = bit_pos_list[0]
+                amount_of_bytes = ceil(next_bit / 8)
+                remaining_bits = next_bit % 8
+
+                for i in range(amount_of_bytes - 1):
+                    bitfield_list.append(f"\tuint8_t UnknownSignal_{filler_counter} : 8;\t // bits {i*8}-{(i+1)*8}")
+                    filler_counter += 1
+
+                bitfield_list.append(f"\tuint8_t UnknownSignal_{filler_counter} : {remaining_bits};\t // bits {(amount_of_bytes - 1) * 8}-{next_bit - 1}")
+                filler_counter += 1
+
             for bit_pos in bit_pos_list:
-                pass
+                # Handle bitfield
+                signal = message.signals[bit_pos]
+                if signal.size > 8:
+                    amount_of_bytes = ceil(signal.size / 8)
+                    remaining_bits = signal.size % 8
 
+                    for i in range(amount_of_bytes - 1):
+                        bitfield_list.append(f"\tuint8_t {signal.name + "_" + str(i)} : 8;\t // bits {bit_pos + i * 8}-{bit_pos + 7 + i * 8 }")
 
-        file_text = c_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                    bitfield_list.append(
+                        f"\tuint8_t {signal.name + "_" + str(amount_of_bytes - 1)} : {remaining_bits};\t // bits {bit_pos + (amount_of_bytes - 1) * 8}-{bit_pos + (amount_of_bytes - 1) * 8 + remaining_bits - 1}")
+                else:
+                    if signal.size > 1:
+                        bitfield_list.append(f"\tuint8_t {signal.name} : {signal.size};\t // bits {bit_pos}-{bit_pos + signal.size - 1}")
+                    else:
+                        bitfield_list.append(f"\tuint8_t {signal.name} : 1;\t // bit {bit_pos}")
+
+                # Handle variables
+                si_signal = self.signals[signal.name]
+                persistent_var_list.append(f"{si_signal.type} {message.name}_{signal.name};")
+                message_init_list.append(f"\t{message.name}_{signal.name} = {str(signal.init_value)};")
+
+                if signal.size <= 8:
+                    if is_send_message:
+                        message_run_list.append(f"\tinfo->{signal.name} = {message.name}_{signal.name};")
+                    else:
+                        message_run_list.append(f"\t{message.name}_{signal.name} = info->{signal.name};")
+                else:
+                    amount_of_bytes = ceil(signal.size / 8)
+                    if is_send_message:
+                        message_run_list.append(f"\tinfo->{signal.name}_{i} = {message.name}_{signal.name} & 0xFF;")
+                        for i in range(1, amount_of_bytes, 1):
+                            message_run_list.append(f"\tinfo->{signal.name}_{i} = ({message.name}_{signal.name} >> {i * 8}) & 0xFF;")
+                    else:
+                        text_row_list = [f"\t{message.name}_{signal.name} = info->{signal.name}_0"]
+                        for i in range(1, amount_of_bytes, 1):
+                            text_row_list.append(f"info->{signal.name}_0 << {i*8}")
+                        message_run_list.append(" | ".join(text_row_list) + ";")
+
+                if is_send_message:
+                    signal_write_list.append(f"inline void canMessageHandler_{message.name}_{signal.name}_Write({si_signal.type} value)\n"
+                                             "{\n"
+                                             f"\t{message.name}_{signal.name} = value;\n"
+                                             "}\n")
+                else:
+                    signal_read_list.append(f"inline {si_signal.type} canMessageHandler_{message.name}_{signal.name}_Read(void)\n"
+                                             "{\n"
+                                             f"\treturn {message.name}_{signal.name};\n"
+                                             "}\n")
+
+            bitfield_list.append(f"}} {message.name}_t;\n")
+            message_init_list.append("}\n")
+            message_run_list.append("}\n")
+
+        file_text = "\n".join(bitfield_list) + "\n"
+        file_text += "\n".join(persistent_var_list) + "\n\n"
+        file_text += "/* Public Functions */\n"
+        file_text += "\n".join(message_init_list) + "\n"
+        file_text += "\n".join(message_run_list) + "\n"
+        file_text += "\n".join(signal_read_list) + "\n"
+        file_text += "\n".join(signal_write_list)
+        file_text = c_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                      MESSAGE_DEFINITION=file_text)
+
+        with open(f"output/canMessageHandler.c", "w") as f:
+            f.write(file_text)
+
 
     def get_can_signals(self):
         can_signals = []
@@ -170,52 +273,6 @@ class SignalInterface:
                 messages.append(signal.message)
 
         return messages
-
-"""
-typedef struct {
-    uint8_t Light_Counter_Lsb : 8;         
-    uint8_t Light_Counter_Msb : 4;         // bits 0-11
-    uint8_t Filler1 : 2;                   // bits 12-13
-    uint8_t Lightmode_Active : 2;          // bits 14-15
-    uint8_t Headlight_Mode_Active : 1;     // bit 16
-    uint8_t Front_Fog_Active : 1;          // bit 17
-    uint8_t Left_Parklight_Active : 1;     // bit 18
-    uint8_t Right_Parklight_Active : 1;    // bit 19
-    uint8_t Rear_Fog_Active : 2;           // bits 20-21
-    uint8_t Light_Switch_Active : 1;       // bit 22
-    uint8_t Reverse_Light_Active : 1;      // bit 23
-    uint8_t Filler2 : 1;                   // bit 24
-    uint8_t Unknown_Active : 1;            // bit 25
-    uint8_t Parklight_Active : 1;          // bit 26
-    uint8_t Filler3 : 2;                   // bits 27-28
-    uint8_t Lefthand_Traffic_Active : 1;   // bit 29
-    uint8_t UnknownSignal : 1;             // bit 30
-    uint8_t Filler4 : 2;                   // bits 31-32
-    uint8_t Highbeam_Active : 1;           // bit 33
-    uint8_t Auto_Light_Active : 1;         // bit 34
-} MQB_Light_Info_t;
-
-/* Persistent variable */
-bool MQB_Light_Info_Highbeam_Active;
-
-/* Public Functions */
-void canMessageHandler_MQB_Light_Info_Handler_init()
-{
-    MQB_Light_Info_Highbeam_Active = false;
-}
-
-void canMessageHandler_MQB_Light_Info_Handler_run(uint8_t payload[8])
-{
-    // Cast payload array to struct pointer for direct access
-    MQB_Light_Info_t* info = (MQB_Light_Info_t*)payload;
-
-    MQB_Light_Info_Highbeam_Active = info->Highbeam_Active;
-}
-
-bool canMessageHandler_MQB_Light_Info_Highbeam_Active_Read(void)
-{
-    return MQB_Light_Info_Highbeam_Active;
-}"""
 
 
 class Signal:
@@ -239,19 +296,19 @@ class CanSignal:
             return "bool"
         elif self.size <= 8:
             if self.signed:
-                return "int_8"
+                return "int8_t"
             else:
-                return "uint_8"
+                return "uint8_t"
         elif self.size <= 16:
             if self.signed:
-                return "int_16"
+                return "int16_t"
             else:
-                return "uint_16"
+                return "uint16_t"
         else:
             if self.signed:
-                return "int_32"
+                return "int32_t"
             else:
-                return "uint_32"
+                return "uint32_t"
 
 
 class IOSignal:
