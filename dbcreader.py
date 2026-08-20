@@ -123,7 +123,8 @@ class Database:
 
                     receiver_list = []
                     for receiver_name in receiver_name_list:
-                        receiver_list.append(self.control_units[receiver_name])
+                        if receiver_name in self.control_units:
+                            receiver_list.append(self.control_units[receiver_name])
 
                     # Create the signal object and register it in the database.
                     signal = Signal(signal_name, signal_pos, signal_size, signed, message, receiver_list)
