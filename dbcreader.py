@@ -117,7 +117,7 @@ class Database:
                     signal_pos = int(sub_parts[0])
                     sub_parts = sub_parts[1].split("@")
                     signal_size = int(sub_parts[0])
-                    signed = False if sub_parts[1] == "-" else True
+                    signed = False if sub_parts[1].count("-") == 0 else True
                     receiver_name_list = parts[7:]
 
                     receiver_list = []
