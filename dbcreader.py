@@ -48,6 +48,7 @@ class Signal:
         self.signed = signed
         self.message = message
         self.receivers = receivers
+        self.init_value = 0
         message.add_signal(self)
 
     def __repr__(self):
@@ -80,9 +81,9 @@ class Database:
 
                 for control_unit_name in parts[1:]:
                     self.control_units[control_unit_name] = ControlUnit(control_unit_name)
-
+                index+=1
             # Read message section
-            if line.startswith("BO_"):
+            elif line.startswith("BO_"):
                 # Parse the message header: ID, name, and size.
                 parts = line.split()
                 if len(parts) < 4:
@@ -128,9 +129,13 @@ class Database:
                     signal = Signal(signal_name, signal_pos, signal_size, signed, message, receiver_list)
                     self.signals[signal.name] = signal
                     index += 1
+            elif line.startswith("BA_ \"GenSigStartValue\""):
+                parts = line.split()
+                signal = self.signals[parts[4]]
+                signal.init_value = int(parts[5].strip(";"))
+                index += 1
             else:
                 index += 1
-                continue
 
 if __name__ == "__main__":
     db = Database("../database.dbc")
