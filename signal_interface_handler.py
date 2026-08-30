@@ -2,11 +2,11 @@ import json
 import os.path
 import shutil
 import string
+import dbcreader
 
 from datetime import datetime
 from math import ceil
 from pathlib import Path
-from dbcreader import Database
 
 class SignalInterface:
     can_database = None
@@ -33,7 +33,7 @@ class SignalInterface:
         self.software_interface_dict = data[self.ecu_name]
 
         # Handle CAN-database
-        self.can_database = Database(self.dbc_file)
+        self.can_database = dbcreader.Database(self.dbc_file)
 
         for can_signal in self.can_database.signals.values():
             # Only do signals sent or received by this ECU
@@ -142,15 +142,22 @@ class SignalInterface:
         bitfield_list = []
         persistent_var_list = ["/* Persistent variable */"]
         message_init_list = []
+        message_init_name_list = []
         message_run_list = []
+        message_run_name_list = []
         signal_read_list = []
+        signal_read_name_list = []
         signal_write_list = []
+        signal_write_name_list = []
+        message_definition_list = ["messageHandler_Entry canMessageHandler_messages[] = \n\t{"]
 
         can_messages = self.get_can_messages()
 
         for message in can_messages:
             # Prepare init function
             message_init_list.append(f"void canMessageHandler_{message.name}_init()\n{{")
+            message_init_name_list.append(f"void canMessageHandler_{message.name}_init();")
+
             # Prepare run function
             if self.ecu_name in message.transmitter.name:
                 is_send_message = True
@@ -164,6 +171,11 @@ class SignalInterface:
                                         "{\n"
                                         "\t// Cast payload array to struct pointer for direct access\n"
                                         f"\t{message.name}_t* info = ({message.name}_t*)payload;\n")
+            message_run_name_list.append(f"void canMessageHandler_{message.name}_run(uint8_t payload[8]);")
+
+            # Fill message definition list
+            message_definition_list.append(f"\t{{{hex(message.id)},  canMessageHandler_{message.name}_init, canMessageHandler_{message.name}_run}},")
+
             # Prepare variables
             persistent_var_list.append(f"// {message.name}")
 
@@ -233,15 +245,19 @@ class SignalInterface:
                                              "{\n"
                                              f"\t{message.name}_{signal.name} = value;\n"
                                              "}\n")
+                    signal_write_name_list.append(f"inline void canMessageHandler_{message.name}_{signal.name}_Write({si_signal.type} value);")
                 else:
                     signal_read_list.append(f"inline {si_signal.type} canMessageHandler_{message.name}_{signal.name}_Read(void)\n"
                                              "{\n"
                                              f"\treturn {message.name}_{signal.name};\n"
                                              "}\n")
+                    signal_read_name_list.append(f"inline {si_signal.type} canMessageHandler_{message.name}_{signal.name}_Read(void);")
 
             bitfield_list.append(f"}} {message.name}_t;\n")
             message_init_list.append("}\n")
             message_run_list.append("}\n")
+
+        message_definition_list.append("}")
 
         file_text = "\n".join(bitfield_list) + "\n"
         file_text += "\n".join(persistent_var_list) + "\n\n"
@@ -256,6 +272,22 @@ class SignalInterface:
         with open(f"output/canMessageHandler.c", "w") as f:
             f.write(file_text)
 
+        file_text = "\t/* Init functions */\n\t"
+        file_text += "\n\t".join(message_init_name_list) + "\n\n"
+        file_text += "\t/* Run functions */\n\t"
+        file_text += "\n\t".join(message_run_name_list) + "\n\n"
+        file_text += "\t/* Write functions */\n\t"
+        file_text += "\n\t".join(signal_write_name_list) + "\n\n"
+        file_text += "\t/* Read functions */\n\t"
+        file_text += "\n\t".join(signal_read_name_list) + "\n\n"
+        file_text += "\t/* Message definitions list */\n\t"
+        file_text += "\n\t".join(message_definition_list)
+        file_text = h_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                      MESSAGE_DEFINITION=file_text)
+
+        with open(f"output/canMessageHandler.h", "w") as f:
+            f.write(file_text)
+
 
     def get_can_signals(self):
         can_signals = []
@@ -265,7 +297,7 @@ class SignalInterface:
 
         return can_signals
 
-    def get_can_messages(self):
+    def get_can_messages(self) -> list[dbcreader.Message]:
         can_signals = self.get_can_signals()
         messages = []
         for signal in can_signals:
