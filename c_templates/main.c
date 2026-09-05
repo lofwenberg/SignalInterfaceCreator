@@ -8,7 +8,7 @@
 #include <xc.h>
 #include "canHandler.h"
 #include "ioHandler.h"
-#include "runnables.h"
+#include "periodicals.h"
 
 void initBoard(void);
 
@@ -18,22 +18,33 @@ int main(void)
     initBoard();
     canHandler_init();
     ioHandler_init();
-    runnables_init();
+    periodicals_init();
 
     // Main runnable
     for(;;)
     {
         canHandler_run();
         ioHandler_run();
-        runnables_run();
+        periodicals_run();
     }
 }
 
-void initBoard()
+void initBoard(void)
 {
     // Setup clock to 32MHz, closest to 40
     OSCFRQ = 0b0110;   // 32 MHz
 
     // Select HFINTOSC on OSC1
     OSCCON1bits.NOSC = 0b110;  // HFINTOSC in OSC1
+
+    // Enable oscillators
+    OSCENbits.HFOEN = 1;  // Enable HFINTOSC
+    OSCENbits.MFOEN = 1; // Enable MFINTOSC
+
+    // Configure universal timer
+    TU16AHLTbits.RESET = 0b10; // Reset on start and at each match of PR
+    TU16ACLKbits.CLK = 0b00110; // Clock source MFINTOSC(32kHz)
+    TU16APSbits.PS = 32 - 1; // Prescaler 1:32 -> 1kHz
+    TU16APR = 65000; // Timer resets at 65000 ms(highest 16-bit value that is divisible by 1000)
+    TU16ACON0bits.ON = 1; // Enable timer
 }

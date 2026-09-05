@@ -1,6 +1,4 @@
 import json
-import os.path
-import shutil
 import string
 import dbcreader
 
@@ -16,7 +14,6 @@ class SignalInterface:
         self.ecu_name = ""
         self.software_interface_dict = None
         self.signals = dict()
-        self.software_components = dict()
         self.si_path = Path(si_path)
 
         # Check that SI path exists
@@ -80,10 +77,10 @@ class SignalInterface:
         if "software_components" not in self.software_interface_dict:
             raise ValueError(f"Expecting a 'software_components' object for {self.ecu_name}")
 
-        swcs = SoftwareComponent.parse_swcs(si_path, self.software_interface_dict["software_components"])
+        self.software_components = SoftwareComponent.parse_swcs(si_path, self.software_interface_dict["software_components"])
 
         # Validate signals in SWCs
-        for swc_name, swc in swcs.items():
+        for swc_name, swc in self.software_components.items():
             for signal_name in swc.input_signals:
                 if signal_name in self.signals:
                     # Signal found, check for direction
@@ -112,11 +109,13 @@ class SignalInterface:
         self._generate_static_files()
         self._generate_can_handler()
         self._generate_io_handler()
+        self._generate_periodicals()
 
     def _generate_static_files(self):
         files = ["main.c",
                  "canHandler.c",
-                 "canHandler.h"]
+                 "canHandler.h",
+                 "periodicals.h"]
 
         for file in files:
             with open(f"c_templates/{file}") as f:
@@ -158,16 +157,13 @@ class SignalInterface:
             # Prepare run function
             if self.ecu_name in message.transmitter.name:
                 is_send_message = True
-                message_run_list.append(f"void canMessageHandler_{message.name}_run(uint8_t payload[8])\n"
-                                        "{\n"
-                                        "\t// Create send struct\n"
-                                        f"\t{message.name}_t* info;\n")
             else:
                 is_send_message = False
-                message_run_list.append(f"void canMessageHandler_{message.name}_run(uint8_t payload[8])\n"
-                                        "{\n"
-                                        "\t// Cast payload array to struct pointer for direct access\n"
-                                        f"\t{message.name}_t* info = ({message.name}_t*)payload;\n")
+
+            message_run_list.append(f"void canMessageHandler_{message.name}_run(uint8_t payload[8])\n"
+                                    "{\n"
+                                    "\t// Cast payload array to struct pointer for direct access\n"
+                                    f"\t{message.name}_t* info = ({message.name}_t*)payload;\n")
             message_run_name_list.append(f"void canMessageHandler_{message.name}_run(uint8_t payload[8]);")
 
             # Fill message definition list
@@ -222,19 +218,19 @@ class SignalInterface:
 
                 if signal.size <= 8:
                     if is_send_message:
-                        message_run_list.append(f"\tinfo->{signal.name} = {message.name}_{signal.name};")
+                        message_run_list.append(f"\tinfo->{signal.name} = (uint8_t){message.name}_{signal.name};")
                     else:
                         message_run_list.append(f"\t{message.name}_{signal.name} = info->{signal.name};")
                 else:
                     amount_of_bytes = ceil(signal.size / 8)
                     if is_send_message:
-                        message_run_list.append(f"\tinfo->{signal.name}_0 = {message.name}_{signal.name} & 0xFF;")
+                        message_run_list.append(f"\tinfo->{signal.name}_0 = (uint8_t)({message.name}_{signal.name} & 0xFF);")
                         for i in range(1, amount_of_bytes, 1):
-                            message_run_list.append(f"\tinfo->{signal.name}_{i} = ({message.name}_{signal.name} >> {i * 8}) & 0xFF;")
+                            message_run_list.append(f"\tinfo->{signal.name}_{i} = (uint8_t)(({message.name}_{signal.name} >> {i * 8}) & 0xFF);")
                     else:
-                        text_row_list = [f"\t{message.name}_{signal.name} = info->{signal.name}_0"]
+                        text_row_list = [f"\t{message.name}_{signal.name} = ({si_signal.type})info->{signal.name}_0"]
                         for i in range(1, amount_of_bytes, 1):
-                            text_row_list.append(f"(info->{signal.name}_0 << {i*8})")
+                            text_row_list.append(f"({si_signal.type})(info->{signal.name}_0 << {i*8})")
                         message_run_list.append(" | ".join(text_row_list) + ";")
 
                 if is_send_message:
@@ -254,7 +250,7 @@ class SignalInterface:
             message_init_list.append("}\n")
             message_run_list.append("}\n")
 
-        message_definition_list.append("}")
+        message_definition_list.append("};")
 
         file_text = "\n".join(bitfield_list) + "\n"
         file_text += "\n".join(persistent_var_list) + "\n\n"
@@ -369,11 +365,54 @@ class SignalInterface:
         with open(f"{self.si_path}/ioHandler.c", "w") as f:
             f.write(file_text)
 
-        file_text = file_text = h_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        file_text = h_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                       IO_PIN_FUNCTION_NAMES = io_pin_function_names)
 
         # Using flag "w" makes sure file is overwritten each time
         with open(f"{self.si_path}/ioHandler.h", "w") as f:
+            f.write(file_text)
+
+    def _generate_periodicals(self):
+        with open(f"c_templates/periodicals_TEMPLATE.c") as f:
+            c_file = string.Template(f.read())
+
+        external_defines_list = []
+        last_run_variables_list = []
+        swc_inits_list = []
+        swc_runs_list = []
+
+        for swc in self.software_components.values():
+            for init_func in swc.inits:
+                swc_inits_list.append(f"\t{init_func}();")
+                external_defines_list.append(f"extern void {init_func}();")
+
+            for periodical, period in swc.periodicals:
+                external_defines_list.append(f"extern void {periodical}();")
+                last_run_variables_list.append(f"uint16_t {periodical}_last_run = {0xffff-period}; // Set last run to one period ago")
+
+                # Check if timer has passed last run
+                swc_runs_list.append(f"\t// Check if timer for {periodical} has elapsed")
+                swc_runs_list.append(f"\tif((current_time - {periodical}_last_run) > {period})\n\t{{")
+                swc_runs_list.append(f"\t\t{periodical}();")
+                swc_runs_list.append(f"\t\t{periodical}_last_run = current_time;")
+                swc_runs_list.append(f"\t}}\n")
+
+            # Line break for prettyness
+            external_defines_list.append("")
+
+        external_defines = "\n".join(external_defines_list)
+        last_run_variables = "\n".join(last_run_variables_list)
+        swc_inits = "\n".join(swc_inits_list)
+        swc_runs = "\n".join(swc_runs_list)
+
+        file_text = c_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                      EXTERNAL_DEFINES=external_defines,
+                                      SWC_INITS=swc_inits,
+                                      SWC_RUNS=swc_runs,
+                                      LAST_RUN_VARIABLES=last_run_variables)
+
+        # Using flag "w" makes sure file is overwritten each time
+        with open(f"{self.si_path}/periodicals.c", "w") as f:
             f.write(file_text)
 
 
@@ -393,10 +432,6 @@ class SignalInterface:
                 messages.append(signal.message)
 
         return messages
-
-
-class Signal:
-    pass
 
 
 class CanSignal:
