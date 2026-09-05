@@ -5,9 +5,8 @@
  * Date: $CREATION_DATE
  */
 
-#include <stdbool.h>
-#include <stdint.h>
 #include <xc.h>
+#include "canMessageHandler.h"
 
 /* Message definition */
 $MESSAGE_DEFINITION

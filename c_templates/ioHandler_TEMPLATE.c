@@ -5,10 +5,8 @@
  * Date: $CREATION_DATE
  */
 
-#include <stdbool.h>
 #include <xc.h>
-#include <ioHandler.h>
-#include <signals.h>
+#include "ioHandler.h"
 
 /* Persistent variables */
 $IO_VARIABLES

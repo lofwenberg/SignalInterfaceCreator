@@ -7,9 +7,10 @@
 
 #include <xc.h>
 #include "canHandler.h"
-#include "initBoard.h"
 #include "ioHandler.h"
 #include "runnables.h"
+
+void initBoard(void);
 
 int main(void) 
 {
@@ -26,4 +27,13 @@ int main(void)
         ioHandler_run();
         runnables_run();
     }
+}
+
+void initBoard()
+{
+    // Setup clock to 32MHz, closest to 40
+    OSCFRQ = 0b0110;   // 32 MHz
+
+    // Select HFINTOSC on OSC1
+    OSCCON1bits.NOSC = 0b110;  // HFINTOSC in OSC1
 }
