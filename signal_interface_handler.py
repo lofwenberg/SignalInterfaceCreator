@@ -17,12 +17,18 @@ class SignalInterface:
         self.software_interface_dict = None
         self.signals = dict()
         self.software_components = dict()
+        self.si_path = Path(si_path)
 
-        path = Path(f"{si_path}/software_interface.json")
-        if not path.exists():
-            raise FileNotFoundError(f"JSON file not found: {path.resolve()}")
+        # Check that SI path exists
+        if not self.si_path.is_dir():
+            raise FileNotFoundError(f"Signal Interface path {self.si_path} is not a directory")
 
-        with path.open("r", encoding="utf-8") as handle:
+        # Check that there is a software_interface file in the directory
+        si_file = Path(f"{si_path}/software_interface.json")
+        if not si_file.exists():
+            raise FileNotFoundError(f"Software interface file not found: {si_file.resolve()}")
+
+        with si_file.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
 
         # Start doing validation
@@ -102,20 +108,12 @@ class SignalInterface:
                     raise ValueError(f"Output signal {signal_name} defined in software component {swc_name} is missing in {self.ecu_name}")
 
     def generate_templates(self):
-        # Start by clearing out output
-        if os.path.isdir("output"):
-            # Remove dir, easiest way to clean
-            shutil.rmtree("output")
-
-        # Recreate dir
-        os.mkdir("output")
-
         # Generate files
         self._generate_static_files()
         self._generate_can_handler()
+        self._generate_io_handler()
 
-    @staticmethod
-    def _generate_static_files():
+    def _generate_static_files(self):
         files = ["main.c",
                  "canHandler.c",
                  "canHandler.h",
@@ -128,7 +126,8 @@ class SignalInterface:
 
             file_text = file_text.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-            with open(f"output/{file}", "w") as f:
+            # Using flag "w" makes sure file is overwritten each time
+            with open(f"{self.si_path}/{file}", "w") as f:
                 f.write(file_text)
 
     def _generate_can_handler(self):
@@ -231,13 +230,13 @@ class SignalInterface:
                 else:
                     amount_of_bytes = ceil(signal.size / 8)
                     if is_send_message:
-                        message_run_list.append(f"\tinfo->{signal.name}_{i} = {message.name}_{signal.name} & 0xFF;")
+                        message_run_list.append(f"\tinfo->{signal.name}_0 = {message.name}_{signal.name} & 0xFF;")
                         for i in range(1, amount_of_bytes, 1):
                             message_run_list.append(f"\tinfo->{signal.name}_{i} = ({message.name}_{signal.name} >> {i * 8}) & 0xFF;")
                     else:
                         text_row_list = [f"\t{message.name}_{signal.name} = info->{signal.name}_0"]
                         for i in range(1, amount_of_bytes, 1):
-                            text_row_list.append(f"info->{signal.name}_0 << {i*8}")
+                            text_row_list.append(f"(info->{signal.name}_0 << {i*8})")
                         message_run_list.append(" | ".join(text_row_list) + ";")
 
                 if is_send_message:
@@ -269,7 +268,8 @@ class SignalInterface:
         file_text = c_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                       MESSAGE_DEFINITION=file_text)
 
-        with open(f"output/canMessageHandler.c", "w") as f:
+        # Using flag "w" makes sure file is overwritten each time
+        with open(f"{self.si_path}/canMessageHandler.c", "w") as f:
             f.write(file_text)
 
         file_text = "\t/* Init functions */\n\t"
@@ -285,7 +285,86 @@ class SignalInterface:
         file_text = h_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                       MESSAGE_DEFINITION=file_text)
 
-        with open(f"output/canMessageHandler.h", "w") as f:
+        # Using flag "w" makes sure file is overwritten each time
+        with open(f"{self.si_path}/canMessageHandler.h", "w") as f:
+            f.write(file_text)
+
+    def _generate_io_handler(self):
+
+        with open(f"c_templates/ioHandler_TEMPLATE.c") as f:
+            c_file = string.Template(f.read())
+
+        with open(f"c_templates/canMessageHandler_TEMPLATE.h") as f:
+            h_file = string.Template(f.read())
+
+        io_variables_list = []
+        io_configuration_list = []
+        io_default_values_list = []
+        io_run_list = []
+        io_pin_functions_list = []
+
+        for signal in self.signals.values():
+            if isinstance(signal, IOSignal):
+                io_variables_list.append(f"bool {signal.connection.upper()}_Status;")
+
+                io_configuration_list.append(f"\t// Configure {signal.name} to PIN {signal.connection.upper()}")
+
+                if signal.is_input:
+                    io_configuration_list.append(f"\tTRIS{signal.connection.upper()} = 1; // Signal is input")
+
+                    # Read init value from input
+                    io_default_values_list.append(
+                        f"\t{signal.connection.upper()}_Status = PORT{signal.connection.upper()[0]}bits.R{signal.connection.upper()}; // Read init from input")
+
+                    # Read value each run call
+                    io_run_list.append(f"\t{signal.connection.upper()}_Status = PORT{signal.connection.upper()[0]}bits.R{signal.connection.upper()}; // Read {signal.connection.upper()}")
+
+                    # Read signal function
+                    io_pin_functions_list.append(f"bool ioHandler_{signal.name}_{signal.connection.upper()}_Read()\n{{")
+                    io_pin_functions_list.append(f"\treturn {signal.connection.upper()}_Status;\n}}")
+                else:
+                    io_configuration_list.append(f"\tTRIS{signal.connection.upper()} = 0; // Signal is output")
+
+                    # Read init from definition
+                    io_default_values_list.append(
+                        f"\t{signal.connection.upper()}_Status = {int(signal.default_value)}; // Read init from definition")
+                    io_default_values_list.append(
+                        f"\tPORT{signal.connection.upper()[0]}bits.R{signal.connection.upper()} = {signal.connection.upper()}_Status;")
+
+                    # Write value each run call
+                    io_run_list.append(
+                        f"\tPORT{signal.connection.upper()[0]}bits.R{signal.connection.upper()} = {signal.connection.upper()}_Status; // Write {signal.connection.upper()}")
+
+                    # Write signal function
+                    io_pin_functions_list.append(f"void ioHandler_{signal.name}_{signal.connection.upper()}_Write(bool value)\n{{")
+                    io_pin_functions_list.append(f"\t{signal.connection.upper()}_Status = value;\n}}")
+
+                io_configuration_list.append(f"\tANSEL{signal.connection.upper()} = 0; // Signal is not analogue")
+
+                if signal.is_input and signal.pullup:
+                    io_configuration_list.append(f"\tWPU{signal.connection.upper()} = 1; // Activate pullup")
+                elif signal.is_input and not signal.pullup:
+                    io_configuration_list.append(f"\tWPU{signal.connection.upper()} = 0; // Deactivate pullup")
+
+                # Blank row between signals
+                io_configuration_list.append("")
+                io_pin_functions_list.append("")
+
+        io_variables = "\n".join(io_variables_list)
+        io_configuration = "\n".join(io_configuration_list)
+        io_default_values = "\n".join(io_default_values_list)
+        io_run = "\n".join(io_run_list)
+        io_pin_functions = "\n".join(io_pin_functions_list)
+
+        file_text = c_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                      IO_VARIABLES=io_variables,
+                                      IO_CONFIGURATION=io_configuration,
+                                      IO_DEFAULT_VALUES=io_default_values,
+                                      IO_RUN=io_run,
+                                      IO_PIN_FUNCTIONS = io_pin_functions)
+
+        # Using flag "w" makes sure file is overwritten each time
+        with open(f"{self.si_path}/ioHandler.c", "w") as f:
             f.write(file_text)
 
 
@@ -344,11 +423,12 @@ class CanSignal:
 
 
 class IOSignal:
-    def __init__(self, signal_name: str, connection: str, is_input: bool, pullup: bool):
+    def __init__(self, signal_name: str, connection: str, is_input: bool, pullup: bool, default_value: bool):
         self.name = signal_name
         self.connection = connection
         self.is_input = is_input
         self.pullup = pullup
+        self.default_value = default_value
         self.type = "bool"
 
     @classmethod
@@ -384,7 +464,15 @@ class IOSignal:
             if not isinstance(pullup, bool):
                 raise ValueError(f"Expecting boolean value for pullup entry in IO signal {signal_name}")
 
-            signal = cls(signal_name, pin_connection, is_input, pullup)
+            if "default" not in signal_dict:
+                raise ValueError(f"Expecting default value for IO signal {signal_name}")
+
+            default_value = signal_dict["default"]
+
+            if not isinstance(default_value, bool):
+                raise ValueError(f"Expecting boolean value for default value entry in IO signal {signal_name}")
+
+            signal = cls(signal_name, pin_connection, is_input, pullup, default_value)
 
             signals[signal_name] = signal
 
