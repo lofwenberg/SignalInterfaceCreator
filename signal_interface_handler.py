@@ -116,9 +116,7 @@ class SignalInterface:
     def _generate_static_files(self):
         files = ["main.c",
                  "canHandler.c",
-                 "canHandler.h",
-                 "initBoard.c",
-                 "initBoard.h"]
+                 "canHandler.h"]
 
         for file in files:
             with open(f"c_templates/{file}") as f:
@@ -294,7 +292,7 @@ class SignalInterface:
         with open(f"c_templates/ioHandler_TEMPLATE.c") as f:
             c_file = string.Template(f.read())
 
-        with open(f"c_templates/canMessageHandler_TEMPLATE.h") as f:
+        with open(f"c_templates/ioHandler_TEMPLATE.h") as f:
             h_file = string.Template(f.read())
 
         io_variables_list = []
@@ -302,6 +300,7 @@ class SignalInterface:
         io_default_values_list = []
         io_run_list = []
         io_pin_functions_list = []
+        io_pin_function_names_list = []
 
         for signal in self.signals.values():
             if isinstance(signal, IOSignal):
@@ -321,6 +320,7 @@ class SignalInterface:
 
                     # Read signal function
                     io_pin_functions_list.append(f"bool ioHandler_{signal.name}_{signal.connection.upper()}_Read()\n{{")
+                    io_pin_function_names_list.append(f"bool ioHandler_{signal.name}_{signal.connection.upper()}_Read();")
                     io_pin_functions_list.append(f"\treturn {signal.connection.upper()}_Status;\n}}")
                 else:
                     io_configuration_list.append(f"\tTRIS{signal.connection.upper()} = 0; // Signal is output")
@@ -337,6 +337,7 @@ class SignalInterface:
 
                     # Write signal function
                     io_pin_functions_list.append(f"void ioHandler_{signal.name}_{signal.connection.upper()}_Write(bool value)\n{{")
+                    io_pin_function_names_list.append(f"void ioHandler_{signal.name}_{signal.connection.upper()}_Write(bool value);")
                     io_pin_functions_list.append(f"\t{signal.connection.upper()}_Status = value;\n}}")
 
                 io_configuration_list.append(f"\tANSEL{signal.connection.upper()} = 0; // Signal is not analogue")
@@ -355,6 +356,7 @@ class SignalInterface:
         io_default_values = "\n".join(io_default_values_list)
         io_run = "\n".join(io_run_list)
         io_pin_functions = "\n".join(io_pin_functions_list)
+        io_pin_function_names = "\n".join(io_pin_function_names_list)
 
         file_text = c_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                       IO_VARIABLES=io_variables,
@@ -365,6 +367,13 @@ class SignalInterface:
 
         # Using flag "w" makes sure file is overwritten each time
         with open(f"{self.si_path}/ioHandler.c", "w") as f:
+            f.write(file_text)
+
+        file_text = file_text = h_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                      IO_PIN_FUNCTION_NAMES = io_pin_function_names)
+
+        # Using flag "w" makes sure file is overwritten each time
+        with open(f"{self.si_path}/ioHandler.h", "w") as f:
             f.write(file_text)
 
 
