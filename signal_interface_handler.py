@@ -109,6 +109,7 @@ class SignalInterface:
         self._generate_static_files()
         self._generate_can_handler()
         self._generate_io_handler()
+        self._generate_internal_signal_handler()
         self._generate_periodicals()
         self._generate_software_components(remove_stubs)
 
@@ -373,6 +374,65 @@ class SignalInterface:
         with open(f"{self.si_path}/ioHandler.h", "w") as f:
             f.write(file_text)
 
+    def _generate_internal_signal_handler(self):
+
+        with open(f"c_templates/internalSignalHandler_TEMPLATE.c") as f:
+            c_file = string.Template(f.read())
+
+        with open(f"c_templates/internalSignalHandler_TEMPLATE.h") as f:
+            h_file = string.Template(f.read())
+
+        signal_variables_list = []
+        default_values_list = []
+        write_read_functions_list = []
+        write_read_function_names_list = []
+
+        for signal in self.signals.values():
+            if isinstance(signal, InternalSignal):
+                signal_variables_list.append(f"{signal.type} {signal.name}_Status;")
+
+                # Read init value from definition
+                # If default value is a bool, we need to lower it as python capitalize bools
+                if isinstance(signal.default_value, bool):
+                    default_value = str(signal.default_value).lower()
+                else:
+                    default_value = signal.default_value
+                default_values_list.append(f"\t{signal.name}_Status = {default_value}; // Read init value from definition")
+
+                # Read signal function
+                write_read_functions_list.append(f"{signal.type} internalSignalHandler_{signal.name}_Read()\n{{")
+                write_read_function_names_list.append(f"\t{signal.type} internalSignalHandler_{signal.name}_Read();")
+                write_read_functions_list.append(f"\treturn {signal.name}_Status;\n}}")
+
+                # Write signal function
+                write_read_functions_list.append(f"void internalSignalHandler_{signal.name}_Write({signal.type} value)\n{{")
+                write_read_function_names_list.append(f"\tvoid internalSignalHandler_{signal.name}_Write({signal.type} value);")
+                write_read_functions_list.append(f"\t{signal.name}_Status = value;\n}}")
+
+                # Blank row between signals
+                write_read_functions_list.append("")
+
+        signal_variables = "\n".join(signal_variables_list)
+        default_values = "\n".join(default_values_list)
+        write_read_functions = "\n".join(write_read_functions_list)
+        write_read_function_names = "\n".join(write_read_function_names_list)
+
+        file_text = c_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                      SIGNAL_VARIABLES=signal_variables,
+                                      DEFAULT_VALUES=default_values,
+                                      WRITE_READ_FUNCTIONS = write_read_functions)
+
+        # Using flag "w" makes sure file is overwritten each time
+        with open(f"{self.si_path}/internalSignalHandler.c", "w") as f:
+            f.write(file_text)
+
+        file_text = h_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                      WRITE_READ_FUNCTION_NAMES = write_read_function_names)
+
+        # Using flag "w" makes sure file is overwritten each time
+        with open(f"{self.si_path}/internalSignalHandler.h", "w") as f:
+            f.write(file_text)
+
     def _generate_periodicals(self):
         with open(f"c_templates/periodicals_TEMPLATE.c") as f:
             c_file = string.Template(f.read())
@@ -579,9 +639,10 @@ class IOSignal:
 
 
 class InternalSignal:
-    def __init__(self, signal_name: str, signal_type: str):
+    def __init__(self, signal_name: str, signal_type: str, default_value):
         self.name = signal_name
         self.type = signal_type
+        self.default_value = default_value
 
     @classmethod
     def parse_signals(cls, json_signal_list: list[dict]) -> dict[str, InternalSignal]:
@@ -600,7 +661,13 @@ class InternalSignal:
 
             signal_type = signal_dict["type"]
 
-            signal = cls(signal_name, signal_type)
+            if "default" not in signal_dict:
+                # If not default value found, set 0
+                default_value = 0
+            else:
+                default_value = signal_dict["default"]
+
+            signal = cls(signal_name, signal_type, default_value)
 
             signals[signal_name] = signal
 

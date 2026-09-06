@@ -8,6 +8,7 @@
 #include <xc.h>
 #include "canHandler.h"
 #include "ioHandler.h"
+#include "signalHandler.h"
 #include "periodicals.h"
 
 void initBoard(void);
@@ -18,6 +19,7 @@ int main(void)
     initBoard();
     canHandler_init();
     ioHandler_init();
+    signalHandler_init();
     periodicals_init();
 
     // Main runnable
@@ -25,6 +27,7 @@ int main(void)
     {
         canHandler_run();
         ioHandler_run();
+        signalHandler_run();
         periodicals_run();
     }
 }
