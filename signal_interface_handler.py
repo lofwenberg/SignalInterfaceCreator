@@ -112,6 +112,7 @@ class SignalInterface:
         self._generate_internal_signal_handler()
         self._generate_periodicals()
         self._generate_software_components(remove_stubs)
+        self._generate_signal_definitions()
 
     def _generate_static_files(self):
         files = ["main.c",
@@ -404,6 +405,9 @@ class SignalInterface:
                 write_read_function_names_list.append(f"\t{signal.type} internalSignalHandler_{signal.name}_Read();")
                 write_read_functions_list.append(f"\treturn {signal.name}_Status;\n}}")
 
+                # Blank row between functions
+                write_read_functions_list.append("")
+
                 # Write signal function
                 write_read_functions_list.append(f"void internalSignalHandler_{signal.name}_Write({signal.type} value)\n{{")
                 write_read_function_names_list.append(f"\tvoid internalSignalHandler_{signal.name}_Write({signal.type} value);")
@@ -530,6 +534,42 @@ class SignalInterface:
             with open(f"{self.si_path}/{swc.name}/{swc.name}.h", "w") as f:
                 f.write(file_text)
 
+    def _generate_signal_definitions(self):
+
+        with open(f"c_templates/signalDefinitions_TEMPLATE.h") as f:
+            h_file = string.Template(f.read())
+
+        signal_definitions_list = []
+
+        for signal in self.signals.values():
+            if isinstance(signal, CanSignal):
+                if signal.is_input:
+                    signal_definitions_list.append(
+                        f"\tinline {signal.type} {signal.name}_Read() {{return canMessageHandler_{signal.database_signal.message.name}_{signal.name}_Read();}}")
+                else:
+                    signal_definitions_list.append(
+                        f"\tinline void {signal.name}_Write({signal.type} value) {{canMessageHandler_{signal.database_signal.message.name}_{signal.name}_Write(value);}}")
+
+            elif isinstance(signal, IOSignal):
+                if signal.is_input:
+                    signal_definitions_list.append(
+                        f"\tinline {signal.type} {signal.name}_Read() {{return ioHandler_{signal.name}_{signal.connection.upper()}_Read();}}")
+                else:
+                    signal_definitions_list.append(
+                        f"\tinline void {signal.name}_Write({signal.type} value) {{ioHandler_{signal.name}_{signal.connection.upper()}_Write(value);}}")
+
+            else: # Internal signal
+                signal_definitions_list.append(f"\tinline {signal.type} {signal.name}_Read() {{return internalSignalHandler_{signal.name}_Read();}}")
+                signal_definitions_list.append(f"\tinline void {signal.name}_Write({signal.type} value) {{internalSignalHandler_{signal.name}_Write(value);}}")
+
+        signal_definitions = "\n".join(signal_definitions_list)
+
+        file_text = h_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                      SIGNAL_DEFINITIONS=signal_definitions)
+
+        # Using flag "w" makes sure file is overwritten each time
+        with open(f"{self.si_path}/signalDefinitions.h", "w") as f:
+            f.write(file_text)
 
     def get_can_signals(self):
         can_signals = []

@@ -13,8 +13,8 @@
 extern "C" {
 #endif
 
-    void signalHandler_init(void);
-    void signalHandler_run(void);
+    void internalSignalHandler_init(void);
+    void internalSignalHandler_run(void);
 
 $WRITE_READ_FUNCTION_NAMES
 
