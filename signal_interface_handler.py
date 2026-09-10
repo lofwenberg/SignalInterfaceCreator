@@ -318,8 +318,8 @@ class SignalInterface:
                     io_run_list.append(f"\t{signal.connection.upper()}_Status = PORT{signal.connection.upper()[0]}bits.R{signal.connection.upper()}; // Read {signal.connection.upper()}")
 
                     # Read signal function
-                    io_pin_functions_list.append(f"bool ioHandler_{signal.name}_{signal.connection.upper()}_Read()\n{{")
-                    io_pin_function_names_list.append(f"bool ioHandler_{signal.name}_{signal.connection.upper()}_Read();")
+                    io_pin_functions_list.append(f"bool ioHandler_{signal.name}_{signal.connection.upper()}_Read(void)\n{{")
+                    io_pin_function_names_list.append(f"bool ioHandler_{signal.name}_{signal.connection.upper()}_Read(void);")
                     io_pin_functions_list.append(f"\treturn {signal.connection.upper()}_Status;\n}}")
                 else:
                     io_configuration_list.append(f"\tTRIS{signal.connection.upper()} = 0; // Signal is output")
@@ -401,8 +401,8 @@ class SignalInterface:
                 default_values_list.append(f"\t{signal.name}_Status = {default_value}; // Read init value from definition")
 
                 # Read signal function
-                write_read_functions_list.append(f"{signal.type} internalSignalHandler_{signal.name}_Read()\n{{")
-                write_read_function_names_list.append(f"\t{signal.type} internalSignalHandler_{signal.name}_Read();")
+                write_read_functions_list.append(f"{signal.type} internalSignalHandler_{signal.name}_Read(void)\n{{")
+                write_read_function_names_list.append(f"\t{signal.type} internalSignalHandler_{signal.name}_Read(void);")
                 write_read_functions_list.append(f"\treturn {signal.name}_Status;\n}}")
 
                 # Blank row between functions
@@ -493,15 +493,12 @@ class SignalInterface:
             with open(f"c_templates/SWC_TEMPLATE.h") as f:
                 h_file = string.Template(f.read())
 
+            with open(f"c_templates/SWC_SI_TEMPLATE.h") as f:
+                si_h_file = string.Template(f.read())
+
             swc_functions_list = []
             swc_functions_names_list = []
-            external_defines_list = []
-
-            for signal in swc.input_signals.values():
-                external_defines_list.append(f"\textern {signal.type} {signal.name}_Read();")
-
-            for signal in swc.output_signals.values():
-                external_defines_list.append(f"\textern void {signal.name}_Write({signal.type} value);")
+            swc_si_function_names_list = []
 
             for init_func in swc.inits:
                 swc_functions_names_list.append(f"\tvoid {init_func}();")
@@ -511,9 +508,15 @@ class SignalInterface:
                 swc_functions_names_list.append(f"\tvoid {periodical}();")
                 swc_functions_list.append(f"void {periodical}()\n{{\n\n}}\n")
 
+            for signal in swc.input_signals.values():
+                swc_si_function_names_list.append(f"\t{signal.type} {signal.name}_Read(void);")
+
+            for signal in swc.output_signals.values():
+                swc_si_function_names_list.append(f"\tvoid {signal.name}_Read({signal.type} value);")
+
             swc_functions = "\n".join(swc_functions_list)
             swc_functions_names = "\n".join(swc_functions_names_list)
-            external_defines = "\n".join(external_defines_list)
+            swc_si_function_names = "\n".join(swc_si_function_names_list)
 
             file_text = c_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                           SWC_NAME=swc.name,
@@ -527,48 +530,59 @@ class SignalInterface:
             file_text = h_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                           SWC_NAME=swc.name,
                                           SWC_NAME_H=swc.name.upper() + "_H",
-                                          EXTERNAL_DEFINES=external_defines,
                                           SWC_FUNCTIONS=swc_functions_names)
 
             # Using flag "w" makes sure file is overwritten each time
             with open(f"{self.si_path}/{swc.name}/{swc.name}.h", "w") as f:
                 f.write(file_text)
 
+            file_text = si_h_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                             SWC_NAME="SI_" + swc.name,
+                                             SWC_NAME_H="SI_" + swc.name.upper() + "_H",
+                                             SWC_FUNCTIONS=swc_si_function_names)
+
+            # Using flag "w" makes sure file is overwritten each time
+            with open(f"{self.si_path}/{swc.name}/SI_{swc.name}.h", "w") as f:
+                f.write(file_text)
+
     def _generate_signal_definitions(self):
 
-        with open(f"c_templates/signalDefinitions_TEMPLATE.h") as f:
-            h_file = string.Template(f.read())
+        with open(f"c_templates/signalDefinitions_TEMPLATE.c") as f:
+            c_file = string.Template(f.read())
 
         signal_definitions_list = []
 
         for signal in self.signals.values():
             if isinstance(signal, CanSignal):
                 if signal.is_input:
-                    signal_definitions_list.append(
-                        f"\tinline {signal.type} {signal.name}_Read() {{return canMessageHandler_{signal.database_signal.message.name}_{signal.name}_Read();}}")
+                    signal_definitions_list.append(f"{signal.type} {signal.name}_Read()\n{{")
+                    signal_definitions_list.append(f"\treturn canMessageHandler_{signal.database_signal.message.name}_{signal.name}_Read();\n}}")
                 else:
-                    signal_definitions_list.append(
-                        f"\tinline void {signal.name}_Write({signal.type} value) {{canMessageHandler_{signal.database_signal.message.name}_{signal.name}_Write(value);}}")
+                    signal_definitions_list.append(f"void {signal.name}_Write({signal.type} value)\n{{")
+                    signal_definitions_list.append(f"\tcanMessageHandler_{signal.database_signal.message.name}_{signal.name}_Write(value);\n}}")
 
             elif isinstance(signal, IOSignal):
                 if signal.is_input:
-                    signal_definitions_list.append(
-                        f"\tinline {signal.type} {signal.name}_Read() {{return ioHandler_{signal.name}_{signal.connection.upper()}_Read();}}")
+                    signal_definitions_list.append(f"{signal.type} {signal.name}_Read()\n{{")
+                    signal_definitions_list.append(f"\treturn ioHandler_{signal.name}_{signal.connection.upper()}_Read();\n}}")
                 else:
-                    signal_definitions_list.append(
-                        f"\tinline void {signal.name}_Write({signal.type} value) {{ioHandler_{signal.name}_{signal.connection.upper()}_Write(value);}}")
+                    signal_definitions_list.append(f"void {signal.name}_Write({signal.type} value)\n{{")
+                    signal_definitions_list.append(f"\nioHandler_{signal.name}_{signal.connection.upper()}_Write(value);\n}}")
 
             else: # Internal signal
-                signal_definitions_list.append(f"\tinline {signal.type} {signal.name}_Read() {{return internalSignalHandler_{signal.name}_Read();}}")
-                signal_definitions_list.append(f"\tinline void {signal.name}_Write({signal.type} value) {{internalSignalHandler_{signal.name}_Write(value);}}")
+                signal_definitions_list.append(f"{signal.type} {signal.name}_Read()\n{{\n\treturn internalSignalHandler_{signal.name}_Read();\n}}\n")
+                signal_definitions_list.append(f"\tvoid {signal.name}_Write({signal.type} value)\n{{\n\tinternalSignalHandler_{signal.name}_Write(value);\n}}")
+
+            # Add row
+            signal_definitions_list.append("")
 
         signal_definitions = "\n".join(signal_definitions_list)
 
-        file_text = h_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        file_text = c_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                       SIGNAL_DEFINITIONS=signal_definitions)
 
         # Using flag "w" makes sure file is overwritten each time
-        with open(f"{self.si_path}/signalDefinitions.h", "w") as f:
+        with open(f"{self.si_path}/signalDefinitions.c", "w") as f:
             f.write(file_text)
 
     def get_can_signals(self):
