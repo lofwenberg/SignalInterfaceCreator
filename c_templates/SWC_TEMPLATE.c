@@ -5,7 +5,6 @@
  * Date: $CREATION_DATE
  */
 
-#include <xc.h>
 #include "$SWC_NAME_H"
 #include "SI_$SWC_NAME_H"
 

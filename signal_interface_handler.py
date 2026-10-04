@@ -89,6 +89,9 @@ class SignalInterface:
                             f"Input signal {signal_name} is defined as input in software component {swc_name} but is defined as output in {self.ecu_name}")
                     if self.signals[signal_name].type != swc.input_signals[signal_name].type:
                         raise ValueError(f"Input signal {signal_name} is not same type in software component {swc_name} and {self.ecu_name}")
+                    # Set can signal as consumed
+                    if type(self.signals[signal_name]) == CanSignal:
+                        self.signals[signal_name].is_consumed = True
                 else:
                     raise ValueError(f"Input signal {signal_name} defined in software component {swc_name} is missing in {self.ecu_name}")
 
@@ -101,6 +104,9 @@ class SignalInterface:
                             f"Output signal {signal_name} is defined as output in software component {swc_name} but is defined as input in {self.ecu_name}")
                     if self.signals[signal_name].type != swc.output_signals[signal_name].type:
                         raise ValueError(f"Output signal {signal_name} is not same type in software component {swc_name} and {self.ecu_name}")
+                    # Set can signal as consumed
+                    if type(self.signals[signal_name]) == CanSignal:
+                        self.signals[signal_name].is_consumed = True
                 else:
                     raise ValueError(f"Output signal {signal_name} defined in software component {swc_name} is missing in {self.ecu_name}")
 
@@ -153,6 +159,13 @@ class SignalInterface:
         can_messages = self.get_can_messages()
 
         for message in can_messages:
+            # Check if message has a consumed signal
+            for signal in message.signals.values():
+                if self.signals[signal.name].is_consumed:
+                    break
+            else:
+                # We only end up here if signal wasn't consumed, in that case, skip entire message
+                continue
             # Prepare init function
             message_init_list.append(f"void canMessageHandler_{message.name}_init()\n{{")
             message_init_name_list.append(f"void canMessageHandler_{message.name}_init();")
@@ -213,6 +226,10 @@ class SignalInterface:
                         bitfield_list.append(f"\tuint8_t {signal.name} : {signal.size};\t // bits {bit_pos}-{bit_pos + signal.size - 1}")
                     else:
                         bitfield_list.append(f"\tuint8_t {signal.name} : 1;\t // bit {bit_pos}")
+
+                # Check if signal is consumed, in that case, only generate bitfield
+                if not self.signals[signal.name].is_consumed:
+                    continue
 
                 # Handle variables
                 si_signal = self.signals[signal.name]
@@ -554,6 +571,8 @@ class SignalInterface:
 
         for signal in self.signals.values():
             if isinstance(signal, CanSignal):
+                if not signal.is_consumed:
+                    continue
                 if signal.is_input:
                     signal_definitions_list.append(f"{signal.type} {signal.name}_Read()\n{{")
                     signal_definitions_list.append(f"\treturn canMessageHandler_{signal.database_signal.message.name}_{signal.name}_Read();\n}}")
