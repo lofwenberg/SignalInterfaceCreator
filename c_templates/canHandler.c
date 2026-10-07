@@ -10,7 +10,7 @@
 #include <string.h>
 #include "canHandler.h"
 #include "canMessageHandler.h"
-
+$CAN_TX_ENABLED
 /* Private function prototypes */
 typedef struct
 {
@@ -41,17 +41,22 @@ typedef struct
 
 // CAN Interface handlers
 bool messageInFifo(void);
-bool transmitQueueNotFull(void);
 void readMessage(CAN_MSG_OBJ *rxCanMsg);
-void sendMessage(CAN_MSG_OBJ *txCanMsg);
+
+#ifdef CAN_TX
+    bool transmitQueueNotFull(void);
+    void sendMessage(CAN_MSG_OBJ *txCanMsg);
+#endif
 
 // Receive functions
 uint32_t getMsgId(CAN_MSG_OBJ *canMessage);
 int getMsgIdEntry(CAN_MSG_OBJ *canMessage);
 
 // Send functions
-void createMessage(CAN_MSG_OBJ *canMessage, uint8_t extendedIdType, uint32_t msgId, uint8_t data[]);
-void setMsgId(CAN_MSG_OBJ *canMessage, uint32_t msgId);
+#ifdef CAN_TX
+    void createMessage(CAN_MSG_OBJ *canMessage, uint8_t extendedIdType, uint32_t msgId, uint8_t data[]);
+    void setMsgId(CAN_MSG_OBJ *canMessage, uint32_t msgId);
+#endif
 
 /* Public functions */
 void canHandler_init()
@@ -154,11 +159,6 @@ bool messageInFifo()
     return C1FIFOSTA1Lbits.TFNRFNIF;
 }
 
-bool transmitQueueNotFull()
-{
-    return C1TXQSTALbits.TXQEIF;
-}
-
 void readMessage(CAN_MSG_OBJ *rxCanMsg)
 {
     memcpy(rxCanMsg, (void *)C1FIFOUA1, 16);
@@ -166,24 +166,31 @@ void readMessage(CAN_MSG_OBJ *rxCanMsg)
     C1FIFOCON1Hbits.UINC = 1;
 }
 
-void sendMessage(CAN_MSG_OBJ *txCanMsg)
-{
-    // Copy message into tx register
-    memcpy((void *)C1TXQUA, txCanMsg, 16);
+#ifdef CAN_TX
+    bool transmitQueueNotFull()
+    {
+        return C1TXQSTALbits.TXQEIF;
+    }
 
-    // Increment tail
-    C1TXQCONHbits.UINC = 1;
+    void sendMessage(CAN_MSG_OBJ *txCanMsg)
+    {
+        // Copy message into tx register
+        memcpy((void *)C1TXQUA, txCanMsg, 16);
 
-    // Request transmission
-    C1TXQCONHbits.TXREQ = 1;
-    
-    // Wait for transmission flag to go out
-    while(C1TXQCONHbits.TXREQ);
-    
-    // Something went wrong, stay here forever?
-    if(C1TXATIFL != 0)
-        while(1);
-}
+        // Increment tail
+        C1TXQCONHbits.UINC = 1;
+
+        // Request transmission
+        C1TXQCONHbits.TXREQ = 1;
+
+        // Wait for transmission flag to go out
+        while(C1TXQCONHbits.TXREQ);
+
+        // Something went wrong, stay here forever?
+        if(C1TXATIFL != 0)
+            while(1);
+    }
+#endif
 
 // Receive functions
 uint32_t getMsgId(CAN_MSG_OBJ *canMessage)
@@ -211,24 +218,26 @@ int getMsgIdEntry(CAN_MSG_OBJ *canMessage)
 }
 
 // Send functions
-void createMessage(CAN_MSG_OBJ *canMessage, uint8_t extendedIdType, uint32_t msgId, uint8_t data[])
-{
-    uint32_t formatedMsgId;
-    canMessage->dlc = 8; // Only support 8 DLC
-    canMessage->extendedIdType = extendedIdType;
-    canMessage->rtrFrameType = 0; // Not currently supported
-    canMessage->brsEnabled = 0; // CAN FD not supported
-    canMessage->fdFormatType = 0; // CAN FD not supported
-	
-    formatedMsgId = msgId & 0x1fffffff;
-    // Copy msgId
-    memcpy(canMessage, &msgId, 4);
-		
-    // Copy data
-    memcpy(&canMessage->data, data, 8);   
-}
+#ifdef CAN_TX
+    void createMessage(CAN_MSG_OBJ *canMessage, uint8_t extendedIdType, uint32_t msgId, uint8_t data[])
+    {
+        uint32_t formatedMsgId;
+        canMessage->dlc = 8; // Only support 8 DLC
+        canMessage->extendedIdType = extendedIdType;
+        canMessage->rtrFrameType = 0; // Not currently supported
+        canMessage->brsEnabled = 0; // CAN FD not supported
+        canMessage->fdFormatType = 0; // CAN FD not supported
 
-void setMsgId(CAN_MSG_OBJ *canMessage, uint32_t msgId)
-{
-    memcpy(canMessage, &msgId, 4);
-}
+        formatedMsgId = msgId & 0x1fffffff;
+        // Copy msgId
+        memcpy(canMessage, &msgId, 4);
+
+        // Copy data
+        memcpy(&canMessage->data, data, 8);
+    }
+
+    void setMsgId(CAN_MSG_OBJ *canMessage, uint32_t msgId)
+    {
+        memcpy(canMessage, &msgId, 4);
+    }
+#endif

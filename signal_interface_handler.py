@@ -38,11 +38,14 @@ class SignalInterface:
         # Handle CAN-database
         self.can_database = dbcreader.Database(self.dbc_file)
 
+        self.can_transmit_enable = False
+
         for can_signal in self.can_database.signals.values():
             # Only do signals sent or received by this ECU
             if self.ecu_name == can_signal.message.transmitter.name:
                 signal = CanSignal(can_signal, False)
                 self.signals[signal.name] = signal
+                self.can_transmit_enable = True
             elif self.ecu_name in can_signal.receivers:
                 signal = CanSignal(can_signal, True)
                 self.signals[signal.name] = signal
@@ -126,11 +129,16 @@ class SignalInterface:
                  "canHandler.h",
                  "periodicals.h"]
 
+        if self.can_transmit_enable:
+            can_tx_enable = "\n#define CAN_TX\n"
+        else:
+            can_tx_enable = ""
+
         for file in files:
             with open(f"c_templates/{file}") as f:
                 file_text = string.Template(f.read())
 
-            file_text = file_text.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            file_text = file_text.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"), CAN_TX_ENABLED=can_tx_enable)
 
             # Using flag "w" makes sure file is overwritten each time
             with open(f"{self.si_path}/{file}", "w") as f:
