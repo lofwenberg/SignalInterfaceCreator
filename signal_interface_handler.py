@@ -534,10 +534,10 @@ class SignalInterface:
                 swc_functions_list.append(f"void {periodical}()\n{{\n\n}}\n")
 
             for signal in swc.input_signals.values():
-                swc_si_function_names_list.append(f"\t{signal.type} {signal.name}_Read(void);")
+                swc_si_function_names_list.append(f"\t{signal.type} SI_{signal.name}_Read(void);")
 
             for signal in swc.output_signals.values():
-                swc_si_function_names_list.append(f"\tvoid {signal.name}_Read({signal.type} value);")
+                swc_si_function_names_list.append(f"\tvoid SI_{signal.name}_Write({signal.type} value);")
 
             swc_functions = "\n".join(swc_functions_list)
             swc_functions_names = "\n".join(swc_functions_names_list)
@@ -582,23 +582,23 @@ class SignalInterface:
                 if not signal.is_consumed:
                     continue
                 if signal.is_input:
-                    signal_definitions_list.append(f"{signal.type} {signal.name}_Read()\n{{")
+                    signal_definitions_list.append(f"{signal.type} SI_{signal.name}_Read()\n{{")
                     signal_definitions_list.append(f"\treturn canMessageHandler_{signal.database_signal.message.name}_{signal.name}_Read();\n}}")
                 else:
-                    signal_definitions_list.append(f"void {signal.name}_Write({signal.type} value)\n{{")
+                    signal_definitions_list.append(f"void SI_{signal.name}_Write({signal.type} value)\n{{")
                     signal_definitions_list.append(f"\tcanMessageHandler_{signal.database_signal.message.name}_{signal.name}_Write(value);\n}}")
 
             elif isinstance(signal, IOSignal):
                 if signal.is_input:
-                    signal_definitions_list.append(f"{signal.type} {signal.name}_Read()\n{{")
+                    signal_definitions_list.append(f"{signal.type} SI_{signal.name}_Read()\n{{")
                     signal_definitions_list.append(f"\treturn ioHandler_{signal.name}_{signal.connection.upper()}_Read();\n}}")
                 else:
-                    signal_definitions_list.append(f"void {signal.name}_Write({signal.type} value)\n{{")
-                    signal_definitions_list.append(f"\nioHandler_{signal.name}_{signal.connection.upper()}_Write(value);\n}}")
+                    signal_definitions_list.append(f"void SI_{signal.name}_Write({signal.type} value)\n{{")
+                    signal_definitions_list.append(f"\tioHandler_{signal.name}_{signal.connection.upper()}_Write(value);\n}}")
 
             else: # Internal signal
-                signal_definitions_list.append(f"{signal.type} {signal.name}_Read()\n{{\n\treturn internalSignalHandler_{signal.name}_Read();\n}}\n")
-                signal_definitions_list.append(f"\tvoid {signal.name}_Write({signal.type} value)\n{{\n\tinternalSignalHandler_{signal.name}_Write(value);\n}}")
+                signal_definitions_list.append(f"{signal.type} SI_{signal.name}_Read()\n{{\n\treturn internalSignalHandler_{signal.name}_Read();\n}}\n")
+                signal_definitions_list.append(f"void SI_{signal.name}_Write({signal.type} value)\n{{\n\tinternalSignalHandler_{signal.name}_Write(value);\n}}")
 
             # Add row
             signal_definitions_list.append("")
