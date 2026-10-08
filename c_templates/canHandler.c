@@ -140,8 +140,8 @@ void canHandler_run()
         readMessage(&canMessage);
         msgIdEntry = getMsgIdEntry( &canMessage);
         
-        // Larget than 0 means we have a match
-        if(msgIdEntry > 0)
+        // Positive number means we have a match
+        if(msgIdEntry >= 0)
         {
             // Get the payload
             memcpy(&payload, canMessage.data, 8);
