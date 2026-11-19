@@ -17,16 +17,16 @@ int main(void)
 {
     // Run initializations
     initBoard();
-    canHandler_init();
     ioHandler_init();
+    canHandler_init();
     internalSignalHandler_init();
     periodicals_init();
 
     // Main runnable
     for(;;)
     {
-        canHandler_run();
         ioHandler_run();
+        canHandler_run();
         internalSignalHandler_run();
         periodicals_run();
     }

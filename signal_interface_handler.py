@@ -507,31 +507,50 @@ class SignalInterface:
 
     def _generate_software_components(self, remove_stubs: bool = False):
         for swc in self.software_components.values():
-            # Check if SWC already exists and remove_stubs is False
-            if Path(f"{self.si_path}/{swc.name}/{swc.name}.c").exists() and not remove_stubs:
-                # SWC exists, do not touch it
-                continue
+            # Only generate stubs ff path doesn't exist or remove stubs is specified
+            if not Path(f"{self.si_path}/{swc.name}/{swc.name}.c").exists() or remove_stubs:
+                with open(f"c_templates/SWC_TEMPLATE.c") as f:
+                    c_file = string.Template(f.read())
 
-            with open(f"c_templates/SWC_TEMPLATE.c") as f:
-                c_file = string.Template(f.read())
+                with open(f"c_templates/SWC_TEMPLATE.h") as f:
+                    h_file = string.Template(f.read())
 
-            with open(f"c_templates/SWC_TEMPLATE.h") as f:
-                h_file = string.Template(f.read())
+                swc_functions_list = []
+                swc_functions_names_list = []
+
+                for init_func in swc.inits:
+                    swc_functions_names_list.append(f"\tvoid {init_func}();")
+                    swc_functions_list.append(f"void {init_func}()\n{{\n\n}}\n")
+
+                for periodical, period in swc.periodicals:
+                    swc_functions_names_list.append(f"\tvoid {periodical}();")
+                    swc_functions_list.append(f"void {periodical}()\n{{\n\n}}\n")
+
+                swc_functions = "\n".join(swc_functions_list)
+                swc_functions_names = "\n".join(swc_functions_names_list)
+
+                file_text = c_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                              SWC_NAME=swc.name,
+                                              SWC_NAME_H=swc.name + ".h",
+                                              SWC_FUNCTIONS=swc_functions)
+
+                # Using flag "w" makes sure file is overwritten each time
+                with open(f"{self.si_path}/{swc.name}/{swc.name}.c", "w") as f:
+                    f.write(file_text)
+
+                file_text = h_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                              SWC_NAME=swc.name,
+                                              SWC_NAME_H=swc.name.upper() + "_H",
+                                              SWC_FUNCTIONS=swc_functions_names)
+
+                # Using flag "w" makes sure file is overwritten each time
+                with open(f"{self.si_path}/{swc.name}/{swc.name}.h", "w") as f:
+                    f.write(file_text)
 
             with open(f"c_templates/SWC_SI_TEMPLATE.h") as f:
                 si_h_file = string.Template(f.read())
 
-            swc_functions_list = []
-            swc_functions_names_list = []
             swc_si_function_names_list = []
-
-            for init_func in swc.inits:
-                swc_functions_names_list.append(f"\tvoid {init_func}();")
-                swc_functions_list.append(f"void {init_func}()\n{{\n\n}}\n")
-
-            for periodical, period in swc.periodicals:
-                swc_functions_names_list.append(f"\tvoid {periodical}();")
-                swc_functions_list.append(f"void {periodical}()\n{{\n\n}}\n")
 
             for signal in swc.input_signals.values():
                 swc_si_function_names_list.append(f"\t{signal.type} SI_{signal.name}_Read(void);")
@@ -539,27 +558,7 @@ class SignalInterface:
             for signal in swc.output_signals.values():
                 swc_si_function_names_list.append(f"\tvoid SI_{signal.name}_Write({signal.type} value);")
 
-            swc_functions = "\n".join(swc_functions_list)
-            swc_functions_names = "\n".join(swc_functions_names_list)
             swc_si_function_names = "\n".join(swc_si_function_names_list)
-
-            file_text = c_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                          SWC_NAME=swc.name,
-                                          SWC_NAME_H=swc.name + ".h",
-                                          SWC_FUNCTIONS=swc_functions)
-
-            # Using flag "w" makes sure file is overwritten each time
-            with open(f"{self.si_path}/{swc.name}/{swc.name}.c", "w") as f:
-                f.write(file_text)
-
-            file_text = h_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                          SWC_NAME=swc.name,
-                                          SWC_NAME_H=swc.name.upper() + "_H",
-                                          SWC_FUNCTIONS=swc_functions_names)
-
-            # Using flag "w" makes sure file is overwritten each time
-            with open(f"{self.si_path}/{swc.name}/{swc.name}.h", "w") as f:
-                f.write(file_text)
 
             file_text = si_h_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                              SWC_NAME="SI_" + swc.name,
@@ -820,4 +819,4 @@ class SoftwareComponent:
 
 if __name__ == "__main__":
     signal_interface = SignalInterface(r"../AuxiliaryLightsModule/", r"../database.dbc")
-    signal_interface.generate_templates(True)
+    signal_interface.generate_templates(False)
