@@ -1,3 +1,10 @@
+"""
+File: dbcreader.py
+Description: Parse CAN databases and represent control units, messages, and signals.
+Author: Richard Löfwenberg
+Created: 2026-08-04
+"""
+
 class ControlUnit:
     """Represents a control unit in the CAN network"""
 
