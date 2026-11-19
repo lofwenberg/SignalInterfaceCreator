@@ -21,6 +21,10 @@ class SignalInterface:
     """Load and validate a signal interface and generate its C implementation."""
 
     can_database = None
+    FORBIDDEN_SWC_NAMES = [
+        "out",
+        "cmake"
+    ]
 
     def __init__(self, si_path: str, dbc_file: str):
         """Initialize the interface from a directory and DBC file."""
@@ -94,7 +98,7 @@ class SignalInterface:
         if "software_components" not in self.software_interface_dict:
             raise ValueError(f"Expecting a 'software_components' object for {self.ecu_name}")
 
-        self.software_components = SoftwareComponent.parse_swcs(si_path, self.software_interface_dict["software_components"])
+        self.software_components = self._parse_swcs(self.software_interface_dict["software_components"])
 
         # Validate signals in SWCs
         for swc_name, swc in self.software_components.items():
@@ -127,7 +131,7 @@ class SignalInterface:
                 else:
                     raise ValueError(f"Output signal {signal_name} defined in software component {swc_name} is missing in {self.ecu_name}")
 
-    def generate_templates(self, remove_stubs: bool = False):
+    def generate_templates(self):
         """Generate all static, handler, periodical, and software-component files."""
         # Generate files
         self._generate_static_files()
@@ -135,7 +139,6 @@ class SignalInterface:
         self._generate_io_handler()
         self._generate_internal_signal_handler()
         self._generate_periodicals()
-        self._generate_software_components(remove_stubs)
         self._generate_signal_definitions()
 
     def _generate_static_files(self):
@@ -525,71 +528,6 @@ class SignalInterface:
         with open(f"{self.si_path}/periodicals.c", "w") as f:
             f.write(file_text)
 
-    def _generate_software_components(self, remove_stubs: bool = False):
-        """Generate software-component source, header, and signal-interface files."""
-        for swc in self.software_components.values():
-            # Only generate stubs ff path doesn't exist or remove stubs is specified
-            if not Path(f"{self.si_path}/{swc.name}/{swc.name}.c").exists() or remove_stubs:
-                with open(f"c_templates/SWC_TEMPLATE.c") as f:
-                    c_file = string.Template(f.read())
-
-                with open(f"c_templates/SWC_TEMPLATE.h") as f:
-                    h_file = string.Template(f.read())
-
-                swc_functions_list = []
-                swc_functions_names_list = []
-
-                for init_func in swc.inits:
-                    swc_functions_names_list.append(f"\tvoid {init_func}();")
-                    swc_functions_list.append(f"void {init_func}()\n{{\n\n}}\n")
-
-                for periodical, period in swc.periodicals:
-                    swc_functions_names_list.append(f"\tvoid {periodical}();")
-                    swc_functions_list.append(f"void {periodical}()\n{{\n\n}}\n")
-
-                swc_functions = "\n".join(swc_functions_list)
-                swc_functions_names = "\n".join(swc_functions_names_list)
-
-                file_text = c_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                              SWC_NAME=swc.name,
-                                              SWC_NAME_H=swc.name + ".h",
-                                              SWC_FUNCTIONS=swc_functions)
-
-                # Using flag "w" makes sure file is overwritten each time
-                with open(f"{self.si_path}/{swc.name}/{swc.name}.c", "w") as f:
-                    f.write(file_text)
-
-                file_text = h_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                              SWC_NAME=swc.name,
-                                              SWC_NAME_H=swc.name.upper() + "_H",
-                                              SWC_FUNCTIONS=swc_functions_names)
-
-                # Using flag "w" makes sure file is overwritten each time
-                with open(f"{self.si_path}/{swc.name}/{swc.name}.h", "w") as f:
-                    f.write(file_text)
-
-            with open(f"c_templates/SWC_SI_TEMPLATE.h") as f:
-                si_h_file = string.Template(f.read())
-
-            swc_si_function_names_list = []
-
-            for signal in swc.input_signals.values():
-                swc_si_function_names_list.append(f"\t{signal.type} SI_{signal.name}_Read(void);")
-
-            for signal in swc.output_signals.values():
-                swc_si_function_names_list.append(f"\tvoid SI_{signal.name}_Write({signal.type} value);")
-
-            swc_si_function_names = "\n".join(swc_si_function_names_list)
-
-            file_text = si_h_file.substitute(CREATION_DATE=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                             SWC_NAME="SI_" + swc.name,
-                                             SWC_NAME_H="SI_" + swc.name.upper() + "_H",
-                                             SWC_FUNCTIONS=swc_si_function_names)
-
-            # Using flag "w" makes sure file is overwritten each time
-            with open(f"{self.si_path}/{swc.name}/SI_{swc.name}.h", "w") as f:
-                f.write(file_text)
-
     def _generate_signal_definitions(self):
         """Generate signal read/write adapters for software components."""
 
@@ -633,6 +571,40 @@ class SignalInterface:
         with open(f"{self.si_path}/signalDefinitions.c", "w") as f:
             f.write(file_text)
 
+    def _parse_swcs(self, swc_list: list) -> dict[str, SoftwareComponent]:
+        """ Parsing the software components"""
+
+        swcs = {}
+        for swc_name in swc_list:
+            # Check if SWC name is forbidden
+            if swc_name in self.FORBIDDEN_SWC_NAMES:
+                raise ValueError(f"SWC name {swc_name} is forbidden and cannot be used")
+
+            # Check that SWC folder exist
+            swc_path = self.si_path.joinpath(swc_name)
+
+            if not swc_path.exists():
+                raise FileNotFoundError(f"Can't find folder for software component: {swc_name}")
+
+            # Check that the three top level files exist
+            if not swc_path.joinpath(f"SI_{swc_name}.h").exists():
+                raise FileNotFoundError(f"SI_{swc_name}.h not found. Regenerate software component and try again")
+
+            if not swc_path.joinpath(f"{swc_name}.c").exists():
+                raise FileNotFoundError(f"{swc_name}.c not found. Regenerate software component and try again")
+
+            if not swc_path.joinpath(f"{swc_name}.h").exists():
+                raise FileNotFoundError(f"{swc_name}.h not found. Regenerate software component and try again")
+
+            swc = SoftwareComponent(swc_path)
+
+            if swc_name != swc.name:
+                raise ValueError(f"The folder {swc_name} does not contain a software component with the same name. Got {swc.name} instead")
+
+            swcs[swc_name] = swc
+
+        return swcs
+
     def get_can_signals(self):
         """Return the database CAN signals used by this interface."""
         can_signals = []
@@ -655,4 +627,4 @@ class SignalInterface:
 
 if __name__ == "__main__":
     signal_interface = SignalInterface(r"../AuxiliaryLightsModule/", r"../database.dbc")
-    signal_interface.generate_templates(False)
+    signal_interface.generate_templates()
