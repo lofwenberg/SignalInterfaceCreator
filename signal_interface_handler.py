@@ -18,6 +18,7 @@ from software_component import SoftwareComponent
 
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "c_templates"
+CAN_DATABASE = Path(__file__).resolve().parent / "database.dbc"
 
 
 class SignalInterface:
@@ -29,9 +30,9 @@ class SignalInterface:
         "cmake"
     ]
 
-    def __init__(self, si_path: str, dbc_file: str):
+    def __init__(self, si_path: str):
         """Initialize the interface from a directory and DBC file."""
-        self.dbc_file = dbc_file
+        self.dbc_file = CAN_DATABASE
         self.ecu_name = ""
         self.software_interface_dict = None
         self.signals = dict()
@@ -629,5 +630,5 @@ class SignalInterface:
 
 
 if __name__ == "__main__":
-    signal_interface = SignalInterface(r"../AuxiliaryLightsModule/", r"../database.dbc")
+    signal_interface = SignalInterface(r"../AuxiliaryLightsModule/")
     signal_interface.generate_templates()
