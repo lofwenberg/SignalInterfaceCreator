@@ -12,12 +12,15 @@ from datetime import datetime
 from signal_interface_helpers import InternalSignal
 
 
+TEMPLATE_DIR = Path(__file__).resolve().parent / "c_templates"
+
+
 class SoftwareComponent:
     def __init__(self, swc_path: Path):
 
-        self.swc_path = swc_path
+        self.swc_path = Path(swc_path)
         # Find json swc file
-        path = Path(f"{swc_path}/software_component.json")
+        path = self.swc_path / "software_component.json"
         if not path.exists():
             raise FileNotFoundError(f"Software component not found: {path.resolve()}")
 
@@ -114,7 +117,7 @@ class SoftwareComponent:
             with open(self.swc_path.joinpath(f"{self.name}.h"), "w") as f:
                 f.write(file_text)
 
-        with open(f"c_templates/SWC_SI_TEMPLATE.h") as f:
+        with (TEMPLATE_DIR / "SWC_SI_TEMPLATE.h").open(encoding="utf-8") as f:
             si_h_file = string.Template(f.read())
 
         swc_si_function_names_list = []
@@ -133,8 +136,7 @@ class SoftwareComponent:
                                          SWC_FUNCTIONS=swc_si_function_names)
 
         # Using flag "w" makes sure file is overwritten each time
-        with open(self.swc_path.joinpath(f"SI_{self.name}.h"), "w") as f:
-            f.write(file_text)
+        (self.swc_path / f"SI_{self.name}.h").write_text(file_text, encoding="utf-8")
 
     @classmethod
     def generate_swc_interface(cls, swc_path: str):
