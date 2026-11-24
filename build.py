@@ -5,9 +5,17 @@ from signal_interface_handler import SignalInterface
 from software_component import SoftwareComponent
 
 def generate(args: argparse.Namespace):
-    # Validate path
-    if not Path.is_dir(args.path):
-        raise ValueError("path must be a directory")
+
+    if args.path is not None:
+        # Validate path
+        if not Path.is_dir(args.path):
+            raise ValueError("path must be a directory")
+        else:
+            path = args.path
+    else:
+        # If path is not specified, assume script is placed in tools directory of repo
+        path = Path(__file__).resolve().parent.parent
+
 
     if args.swc is not None:
         # Generate software components
@@ -16,7 +24,7 @@ def generate(args: argparse.Namespace):
         for swc_name in swc_list:
             # Remove whitespace
             swc_name = swc_name.strip()
-            swc_path = Path(swc_name) / swc_name
+            swc_path = Path(path) / swc_name
             # Create software component instance. Will fail if path does not exist
             swc = SoftwareComponent(swc_path)
             swc_instance_list.append(swc)
@@ -28,7 +36,7 @@ def generate(args: argparse.Namespace):
 
     else:
         # Generate entire signal interface
-        signal_interface = SignalInterface(args.path)
+        signal_interface = SignalInterface(path)
         signal_interface.generate_templates()
 
 def generate_swc(args: argparse.Namespace):
@@ -42,14 +50,14 @@ def main():
     # Generate
     generate_parser = commands.add_parser(
         "generate", aliases=["g"],
-        help="Generate c-code"
+        help="Generate c-code for ECU"
     )
     generate_parser.add_argument(
-        "path",
+        "-p", "--path",
         help="Directory of source code"
     )
     generate_parser.add_argument(
-        "--swc",
+        "-s", "--swc",
         help="Software components to generate, comma separated",
     )
 
@@ -59,7 +67,7 @@ def main():
         help="Generate c-code for software component"
     )
     generate_swc_parser.add_argument(
-        "path",
+        "-p", "--path",
         help="Directory of source code"
     )
 

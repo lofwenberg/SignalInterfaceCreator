@@ -29,11 +29,11 @@ class SignalInterface:
         "com"
     ]
 
-    def __init__(self, si_path: str):
+    def __init__(self, si_path: Path):
         """Initialize the interface from a directory and DBC file."""
         self.ecu_name = ""
         self.signals = dict()
-        self.si_path = Path(si_path)
+        self.si_path = si_path
         self.dbc_file = self.si_path / r"com/database.dbc"
 
         # Check that SI path exists
