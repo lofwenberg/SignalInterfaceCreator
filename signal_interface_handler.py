@@ -18,25 +18,23 @@ from software_component import SoftwareComponent
 
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "c_templates"
-CAN_DATABASE = Path(__file__).resolve().parent / "database.dbc"
 
 
 class SignalInterface:
     """Load and validate a signal interface and generate its C implementation."""
 
-    can_database = None
     FORBIDDEN_SWC_NAMES = [
         "out",
-        "cmake"
+        "cmake",
+        "com"
     ]
 
     def __init__(self, si_path: str):
         """Initialize the interface from a directory and DBC file."""
-        self.dbc_file = CAN_DATABASE
         self.ecu_name = ""
-        self.software_interface_dict = None
         self.signals = dict()
         self.si_path = Path(si_path)
+        self.dbc_file = self.si_path / r"com/database.dbc"
 
         # Check that SI path exists
         if not self.si_path.is_dir():
@@ -47,8 +45,16 @@ class SignalInterface:
         if not si_file.exists():
             raise FileNotFoundError(f"Software interface file not found: {si_file.resolve()}")
 
+        # Check that dbc file exist
+        if not self.dbc_file.exists():
+            raise FileNotFoundError(f"CAN database not found: {self.dbc_file.resolve()}")
+
         with si_file.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
+            data: dict = json.load(handle)
+
+        # JSON-structure should have returned a dict
+        if isinstance(data, dict):
+            raise ValueError(f"JSON file badly formatted")
 
         # Start doing validation
         if len(data) != 1:
@@ -627,8 +633,3 @@ class SignalInterface:
                 messages.append(signal.message)
 
         return messages
-
-
-if __name__ == "__main__":
-    signal_interface = SignalInterface(r"../AuxiliaryLightsModule/")
-    signal_interface.generate_templates()

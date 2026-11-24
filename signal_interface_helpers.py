@@ -1,6 +1,6 @@
 """
 File: signal_interface_helpers.py
-Description: Define signal types and parse signal configuration data.
+Description: Helper module for signal definitions
 Author: Richard Löfwenberg
 Created: 2026-11-19
 """

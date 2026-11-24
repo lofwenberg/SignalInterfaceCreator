@@ -142,6 +142,3 @@ class SoftwareComponent:
     def generate_swc_interface(cls, swc_path: str):
         swc = cls(Path(swc_path))
         swc.generate_interface_files()
-
-if __name__ == "__main__":
-    SoftwareComponent.generate_swc_interface(r"D:\CanReaderProject\TestFolder")
