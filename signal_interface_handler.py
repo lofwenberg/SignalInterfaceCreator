@@ -53,7 +53,7 @@ class SignalInterface:
             data: dict = json.load(handle)
 
         # JSON-structure should have returned a dict
-        if isinstance(data, dict):
+        if not isinstance(data, dict):
             raise ValueError(f"JSON file badly formatted")
 
         # Start doing validation
