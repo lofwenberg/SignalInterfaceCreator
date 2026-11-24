@@ -79,10 +79,10 @@ class SoftwareComponent:
     def generate_interface_files(self, remove_stubs: bool = False):
         # Only generate stubs if path doesn't exist or remove stubs is specified
         if not self.swc_path.joinpath(f"{self.name}.c").exists() or remove_stubs:
-            with (TEMPLATE_DIR / "SWC_TEMPLATE.c").open(encoding="utf-8") as f:
+            with (TEMPLATE_DIR / "SWC_TEMPLATE.c_template").open(encoding="utf-8") as f:
                 c_file = string.Template(f.read())
 
-            with (TEMPLATE_DIR / "SWC_TEMPLATE.h").open(encoding="utf-8") as f:
+            with (TEMPLATE_DIR / "SWC_TEMPLATE.h_template").open(encoding="utf-8") as f:
                 h_file = string.Template(f.read())
 
             swc_functions_list = []
@@ -117,7 +117,7 @@ class SoftwareComponent:
             with open(self.swc_path.joinpath(f"{self.name}.h"), "w") as f:
                 f.write(file_text)
 
-        with (TEMPLATE_DIR / "SWC_SI_TEMPLATE.h").open(encoding="utf-8") as f:
+        with (TEMPLATE_DIR / "SWC_SI_TEMPLATE.h_template").open(encoding="utf-8") as f:
             si_h_file = string.Template(f.read())
 
         swc_si_function_names_list = []

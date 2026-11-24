@@ -153,10 +153,10 @@ class SignalInterface:
 
     def _generate_static_files(self):
         """Generate the static application source files."""
-        files = ["main.c",
-                 "canHandler.c",
-                 "canHandler.h",
-                 "periodicals.h"]
+        files = ["main.c_template",
+                 "canHandler.c_template",
+                 "canHandler.h_template",
+                 "periodicals.h_template"]
 
         if self.can_transmit_enable:
             can_tx_enable = "\n#define CAN_TX\n"
@@ -176,10 +176,10 @@ class SignalInterface:
     def _generate_can_handler(self):
         """Generate CAN message handlers and their public header."""
 
-        with (TEMPLATE_DIR / "canMessageHandler_TEMPLATE.c").open(encoding="utf-8") as f:
+        with (TEMPLATE_DIR / "canMessageHandler_TEMPLATE.c_template").open(encoding="utf-8") as f:
             c_file = string.Template(f.read())
 
-        with (TEMPLATE_DIR / "canMessageHandler_TEMPLATE.h").open(encoding="utf-8") as f:
+        with (TEMPLATE_DIR / "canMessageHandler_TEMPLATE.h_template").open(encoding="utf-8") as f:
             h_file = string.Template(f.read())
 
         bitfield_list = []
@@ -344,10 +344,10 @@ class SignalInterface:
     def _generate_io_handler(self):
         """Generate the I/O handler implementation and header."""
 
-        with (TEMPLATE_DIR / "ioHandler_TEMPLATE.c").open(encoding="utf-8") as f:
+        with (TEMPLATE_DIR / "ioHandler_TEMPLATE.c_template").open(encoding="utf-8") as f:
             c_file = string.Template(f.read())
 
-        with (TEMPLATE_DIR / "ioHandler_TEMPLATE.h").open(encoding="utf-8") as f:
+        with (TEMPLATE_DIR / "ioHandler_TEMPLATE.h_template").open(encoding="utf-8") as f:
             h_file = string.Template(f.read())
 
         io_variables_list = []
@@ -434,10 +434,10 @@ class SignalInterface:
     def _generate_internal_signal_handler(self):
         """Generate the internal-signal handler implementation and header."""
 
-        with (TEMPLATE_DIR / "internalSignalHandler_TEMPLATE.c").open(encoding="utf-8") as f:
+        with (TEMPLATE_DIR / "internalSignalHandler_TEMPLATE.c_template").open(encoding="utf-8") as f:
             c_file = string.Template(f.read())
 
-        with (TEMPLATE_DIR / "internalSignalHandler_TEMPLATE.h").open(encoding="utf-8") as f:
+        with (TEMPLATE_DIR / "internalSignalHandler_TEMPLATE.h_template").open(encoding="utf-8") as f:
             h_file = string.Template(f.read())
 
         signal_variables_list = []
@@ -496,7 +496,7 @@ class SignalInterface:
 
     def _generate_periodicals(self):
         """Generate software-component initialization and periodic scheduling."""
-        with (TEMPLATE_DIR / "periodicals_TEMPLATE.c").open(encoding="utf-8") as f:
+        with (TEMPLATE_DIR / "periodicals_TEMPLATE.c_template").open(encoding="utf-8") as f:
             c_file = string.Template(f.read())
 
         external_defines_list = []
@@ -541,7 +541,7 @@ class SignalInterface:
     def _generate_signal_definitions(self):
         """Generate signal read/write adapters for software components."""
 
-        with (TEMPLATE_DIR / "signalDefinitions_TEMPLATE.c").open(encoding="utf-8") as f:
+        with (TEMPLATE_DIR / "signalDefinitions_TEMPLATE.c_template").open(encoding="utf-8") as f:
             c_file = string.Template(f.read())
 
         signal_definitions_list = []
